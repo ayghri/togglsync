@@ -25,7 +25,7 @@ RUN mkdir -p /data /app/staticfiles && \
     useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app && \
     chmod 777 /data && \
-    chmod +x /app/entrypoint.sh
+    chmod +x /app/scripts/entrypoint.sh
 
 USER appuser
 
@@ -34,4 +34,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')" || exit 1
 
-CMD ["/app/entrypoint.sh"]
+CMD ["/app/scripts/entrypoint.sh"]
