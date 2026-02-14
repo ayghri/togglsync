@@ -1,0 +1,31 @@
+[Unit]
+Description=TogglSync App
+After=network-online.target
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+Environment=DATA_DIR=%h/data/togglsync
+
+
+[Container]
+Image=localhost/togglsync:latest
+ContainerName=togglsync
+PublishPort=127.0.0.1:8893:8000
+EnvironmentFile=%h/env_files/togglsync.env
+UserNS=keep-id
+
+# Data volume
+Volume=${DATA_DIR}:/data:Z
+
+# Health check (internal)
+HealthCmd=curl -f http://localhost:8000/ || exit 1
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=40s
+
+
+[Install]
+WantedBy=default.target
+

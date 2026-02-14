@@ -1,0 +1,22 @@
+# Django
+Django>=6.0.1,<7.0
+python-dotenv>=1.0.0
+
+# Task Queue
+django-q2>=1.9.0
+django-picklefield>=3.4.0
+
+# Google Calendar API
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# HTTP
+requests>=2.31.0
+
+# Production server
+gunicorn>=21.0.0
+whitenoise>=6.6.0
+
+# PostgreSQL support (optional)
+# psycopg2-binary>=2.9.9

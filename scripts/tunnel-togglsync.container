@@ -1,0 +1,20 @@
+[Unit]
+Description=Cloudflare Tunnel for TogglSync
+After=network-online.target togglsync.service
+Requires=togglsync.service
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+EnvironmentFile=%h/env_files/togglsync.env
+
+[Container]
+Image=docker.io/cloudflare/cloudflared:latest
+ContainerName=tunnel-togglsync
+Network=host
+Environment=TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL}
+Exec=tunnel run
+AutoUpdate=registry
+
+[Install]
+WantedBy=default.target
