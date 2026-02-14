@@ -2,7 +2,7 @@
 name = "togglsync"
 version = "0.1.0"
 description = ""
-authors = ["Ayoub Ghriss <dev@ayghri.com>"]
+authors = ["Ayoub Ghriss <dev@ayghri.me>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
