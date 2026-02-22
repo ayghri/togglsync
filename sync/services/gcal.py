@@ -79,8 +79,18 @@ class GoogleCalendarService:
 
         Returns:
             The Google Calendar ID for the Toggl calendar.
+
+        Raises:
+            GoogleCalendarError: If credentials are invalid or expired.
         """
+        # Reload from DB to catch disconnect/reconnect between task queue and execution
+        self.user.refresh_from_db()
         user_creds = self._get_user_creds()
+
+        if not user_creds.is_connected:
+            raise GoogleCalendarError(
+                f"Google Calendar not connected for {self.user.username}"
+            )
 
         # If we have a stored calendar ID, verify it's visible to the user
         if user_creds.google_calendar_id:
@@ -117,6 +127,10 @@ class GoogleCalendarService:
         except HttpError as e:
             if e.resp.status == 404:
                 return False
+            if e.resp.status in (401, 403):
+                raise GoogleCalendarError(
+                    f"Google credentials invalid or expired for {self.user.username}"
+                ) from e
             raise GoogleCalendarError(f"Failed to check calendar list: {e}") from e
 
     def get_calendar(self, calendar_id: str) -> dict | None:
