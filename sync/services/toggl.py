@@ -57,13 +57,6 @@ class TogglService:
     # User & Metadata
     # =========================================================================
 
-    def get_me(self, with_related_data: bool = False):
-        """Get current user info."""
-        params = {}
-        if with_related_data:
-            params["with_related_data"] = "true"
-        return self._request_api("GET", "me", params=params)
-
     def get_organizations(self):
         """Get user's organizations."""
         return self._request_api("GET", "me/organizations")
@@ -98,26 +91,6 @@ class TogglService:
     def get_tags(self, workspace_id: int):
         """Get all tags in a workspace."""
         return self._request_api("GET", f"workspaces/{workspace_id}/tags")
-
-    # =========================================================================
-    # Time Entries
-    # =========================================================================
-
-    def get_time_entries(
-        self, start_date: str | None = None, end_date: str | None = None
-    ):
-        """Get time entries within a date range."""
-        params = {}
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
-
-        return self._request_api("GET", "me/time_entries", params=params)
-
-    def get_time_entry(self, entry_id: int):
-        """Get a single time entry by ID."""
-        return self._request_api("GET", f"me/time_entries/{entry_id}")
 
     # =========================================================================
     # Webhooks

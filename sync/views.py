@@ -36,6 +36,7 @@ def home_page(request):
 
         # Google Calendar configuration
         context["google_config"] = creds.is_connected
+        context["google_calendar_id"] = creds.google_calendar_id
         if creds.gauth_credentials_json:
             from google.oauth2.credentials import Credentials
             try:
@@ -312,7 +313,19 @@ def google_oauth_callback(request):
         logger.info(
             f"Google Calendar connected for user {request.user.username}"
         )
-        messages.success(request, "Google Calendar connected successfully!")
+
+        # Create the Toggl calendar immediately
+        try:
+            from .services import GoogleCalendarService
+            gcal = GoogleCalendarService(user=request.user)
+            calendar_id = gcal.ensure_toggl_calendar()
+            messages.success(
+                request,
+                f"Google Calendar connected! Toggl calendar created: {calendar_id}"
+            )
+        except Exception as e:
+            logger.warning(f"Connected but failed to create Toggl calendar: {e}")
+            messages.success(request, "Google Calendar connected successfully!")
 
         return redirect("sync:landing")
 
@@ -327,9 +340,10 @@ def google_oauth_disconnect(request):
     """Disconnect Google Calendar (clear OAuth tokens)."""
     try:
         creds = request.user.credentials
-        # Clear the OAuth tokens
+        # Clear the OAuth tokens and calendar ID
         creds.gauth_credentials_json = ""
-        creds.save()
+        creds.google_calendar_id = ""
+        creds.save(update_fields=["gauth_credentials_json", "google_calendar_id", "updated_at"])
         logger.info(
             f"Google Calendar disconnected for user {request.user.username}"
         )
@@ -354,5 +368,30 @@ def sync_toggl_metadata(request):
     except Exception as e:
         logger.exception(f"Error syncing Toggl metadata: {e}")
         messages.error(request, f"Error syncing metadata: {e}")
+
+    return redirect("sync:landing")
+
+
+@login_required
+def refresh_calendar(request):
+    """Re-check/recreate the Toggl calendar."""
+    creds = request.user.credentials
+    if not creds.is_connected:
+        messages.error(request, "Google Calendar not connected")
+        return redirect("sync:landing")
+
+    try:
+        from .services import GoogleCalendarService
+        gcal = GoogleCalendarService(user=request.user)
+
+        # Clear stored ID to force recreation
+        creds.google_calendar_id = ""
+        creds.save(update_fields=["google_calendar_id", "updated_at"])
+
+        calendar_id = gcal.ensure_toggl_calendar()
+        messages.success(request, f"Toggl calendar refreshed: {calendar_id}")
+    except Exception as e:
+        logger.exception(f"Error refreshing calendar: {e}")
+        messages.error(request, f"Error refreshing calendar: {e}")
 
     return redirect("sync:landing")

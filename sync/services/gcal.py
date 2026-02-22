@@ -70,11 +70,12 @@ class GoogleCalendarService:
 
     def ensure_toggl_calendar(self) -> str:
         """
-        Ensure the Toggl calendar exists.
+        Return the Toggl calendar ID, creating one if none is stored.
 
-        With calendar.app.created scope, the app owns the calendar. Even if
-        the user removes it from their Google Calendar UI, the API can still
-        access it (soft delete). If it's truly gone, we recreate it.
+        Does NOT verify the calendar still exists on every call (that would
+        add a ~12s API roundtrip per task). If the calendar was deleted,
+        downstream operations will get 404 — callers should catch that and
+        call recreate_toggl_calendar().
 
         Returns:
             The Google Calendar ID for the Toggl calendar.
@@ -91,16 +92,13 @@ class GoogleCalendarService:
                 f"Google Calendar not connected for {self.user.username}"
             )
 
-        # If we have a stored calendar ID, verify it still exists
         if user_creds.google_calendar_id:
-            if self.get_calendar(user_creds.google_calendar_id):
-                return user_creds.google_calendar_id
-            logger.warning(
-                f"Stored calendar {user_creds.google_calendar_id} no longer exists, "
-                f"recreating"
-            )
+            return user_creds.google_calendar_id
 
-        # Create a new "Toggl" calendar
+        return self._create_toggl_calendar()
+
+    def _create_toggl_calendar(self) -> str:
+        """Create a new Toggl calendar and store its ID."""
         self._refresh_maybe()
         cal = self.service.calendars().insert(
             body={
@@ -111,23 +109,12 @@ class GoogleCalendarService:
         ).execute()
 
         calendar_id = cal["id"]
+        user_creds = self._get_user_creds()
         user_creds.google_calendar_id = calendar_id
         user_creds.save(update_fields=["google_calendar_id", "updated_at"])
         logger.info(f"Created Toggl calendar {calendar_id} for {self.user.username}")
 
         return calendar_id
-
-    def get_calendar(self, calendar_id: str) -> dict | None:
-        """Get a calendar by ID."""
-        self._refresh_maybe()
-        try:
-            return (
-                self.service.calendars().get(calendarId=calendar_id).execute()
-            )
-        except HttpError as e:
-            if e.resp.status == 404:
-                return None
-            raise GoogleCalendarError(f"Failed to get calendar: {e}") from e
 
     def create_event(
         self,
@@ -241,25 +228,6 @@ class GoogleCalendarService:
                 )
                 return
             raise GoogleCalendarError(f"Failed to delete event: {e}") from e
-
-    def get_event(self, calendar_id: str, event_id: str) -> dict | None:
-        """Get a single event by ID."""
-        self._refresh_maybe()
-
-        try:
-            return (
-                self.service.events()
-                .get(calendarId=calendar_id, eventId=event_id)
-                .execute()
-            )
-        except HttpError as e:
-            if e.resp.status == 404:
-                return None
-            raise GoogleCalendarError(f"Failed to get event: {e}") from e
-
-    def event_exists(self, calendar_id: str, event_id: str) -> bool:
-        """Check if an event exists in a calendar."""
-        return self.get_event(calendar_id, event_id) is not None
 
     def find_event_by_ical_uid(
         self, calendar_id: str, ical_uid: str

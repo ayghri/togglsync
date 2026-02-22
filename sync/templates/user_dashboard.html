@@ -164,6 +164,11 @@
                     {% if google_token_expiry %}
                     <br><small style="color: #888;">Token expires: {{ google_token_expiry|date:"Y-m-d H:i" }} UTC</small>
                     {% endif %}
+                    {% if google_calendar_id %}
+                    <br><small style="color: #888;">Calendar: <code style="font-size: 11px;">{{ google_calendar_id }}</code></small>
+                    {% else %}
+                    <br><small style="color: #c62828;">No calendar created yet</small>
+                    {% endif %}
                 </div>
             </div>
             {% else %}
@@ -192,6 +197,12 @@
                 {% endif %}
 
                 {% if google_config %}
+                <a
+                    href="{% url 'sync:refresh_calendar' %}"
+                    class="btn btn-primary"
+                    title="Recreate the Toggl calendar on Google Calendar"
+                    >Refresh Calendar</a
+                >
                 <a
                     href="{% url 'sync:google_oauth_disconnect' %}"
                     class="btn btn-secondary"

@@ -27,4 +27,5 @@ urlpatterns = [
 
     # Action endpoints
     path('actions/sync-toggl/', views.sync_toggl_metadata, name='sync_toggl_metadata'),
+    path('actions/refresh-calendar/', views.refresh_calendar, name='refresh_calendar'),
 ]

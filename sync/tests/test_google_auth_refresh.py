@@ -134,7 +134,7 @@ class GoogleAuthRefreshTestCase(TestCase):
             with patch.object(service, '_refresh_maybe', wraps=service._refresh_maybe) as spy:
                 # Call an API method
                 try:
-                    service.get_calendar("test_calendar_id")
+                    service.find_event_by_ical_uid("test_cal", "test_uid")
                 except:
                     pass  # We don't care if it fails, just that refresh was called
 

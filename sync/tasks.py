@@ -358,12 +358,7 @@ def apply_color_to_entry(entry_id: int, color_id: str):
         logger.info(f"Applied color {color_id} to entry {entry.toggl_id}")
 
     except GoogleCalendarError as e:
-        if "404" in str(e) or "Not Found" in str(e):
-            logger.warning(f"Event not found for entry {entry.toggl_id}, marking as not synced")
-            entry.synced = False
-            entry.save(update_fields=["synced"])
-        else:
-            logger.error(f"Failed to apply color to entry {entry.toggl_id}: {e}")
+        logger.error(f"Failed to apply color to entry {entry.toggl_id}: {e}")
     except Exception as e:
         logger.exception(f"Unexpected error applying color to entry {entry.toggl_id}")
         raise
