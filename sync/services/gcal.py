@@ -70,12 +70,11 @@ class GoogleCalendarService:
 
     def ensure_toggl_calendar(self) -> str:
         """
-        Ensure the Toggl calendar exists and is visible to the user.
+        Ensure the Toggl calendar exists.
 
-        With calendar.app.created scope, the app owns the calendar. If the
-        user deletes it from their Google Calendar UI, the API can still
-        access it (soft delete). We check calendarList to confirm it's
-        actually visible to the user, and recreate if not.
+        With calendar.app.created scope, the app owns the calendar. Even if
+        the user removes it from their Google Calendar UI, the API can still
+        access it (soft delete). If it's truly gone, we recreate it.
 
         Returns:
             The Google Calendar ID for the Toggl calendar.
@@ -92,13 +91,13 @@ class GoogleCalendarService:
                 f"Google Calendar not connected for {self.user.username}"
             )
 
-        # If we have a stored calendar ID, verify it's visible to the user
+        # If we have a stored calendar ID, verify it still exists
         if user_creds.google_calendar_id:
-            if self._calendar_in_list(user_creds.google_calendar_id):
+            if self.get_calendar(user_creds.google_calendar_id):
                 return user_creds.google_calendar_id
             logger.warning(
-                f"Stored calendar {user_creds.google_calendar_id} not found "
-                f"in user's calendar list, recreating"
+                f"Stored calendar {user_creds.google_calendar_id} no longer exists, "
+                f"recreating"
             )
 
         # Create a new "Toggl" calendar
@@ -117,21 +116,6 @@ class GoogleCalendarService:
         logger.info(f"Created Toggl calendar {calendar_id} for {self.user.username}")
 
         return calendar_id
-
-    def _calendar_in_list(self, calendar_id: str) -> bool:
-        """Check if a calendar is in the user's calendar list (visible to them)."""
-        self._refresh_maybe()
-        try:
-            self.service.calendarList().get(calendarId=calendar_id).execute()
-            return True
-        except HttpError as e:
-            if e.resp.status == 404:
-                return False
-            if e.resp.status in (401, 403):
-                raise GoogleCalendarError(
-                    f"Google credentials invalid or expired for {self.user.username}"
-                ) from e
-            raise GoogleCalendarError(f"Failed to check calendar list: {e}") from e
 
     def get_calendar(self, calendar_id: str) -> dict | None:
         """Get a calendar by ID."""
