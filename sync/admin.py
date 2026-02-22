@@ -1,11 +1,14 @@
 import json
 import logging
 
+from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
+from django.utils.html import format_html
 from google.oauth2.credentials import Credentials
 
 from .models import UserCredentials
+from .models import EntityColorMapping
 from .models import TogglTimeEntry
 from .models import TogglOrganization
 from .models import TogglProject
@@ -205,6 +208,194 @@ class UserCredsAdmin(UserScopedAdmin):
         extra_context = extra_context or {}
         extra_context["toggl_profile_url"] = "https://track.toggl.com/profile"
         return super().changelist_view(request, extra_context)
+
+
+# =============================================================================
+# Color Mappings
+# =============================================================================
+
+
+class ColorMappingForm(forms.ModelForm):
+    """Custom form for ColorMapping with entity dropdown."""
+
+    entity = forms.ChoiceField(
+        label="Entity",
+        help_text="Select a project, tag, workspace, or organization to map",
+    )
+
+    class Meta:
+        model = EntityColorMapping
+        fields = ["entity", "color_name", "process_order"]
+        widgets = {
+            "color_name": forms.RadioSelect(),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        user = user or getattr(self.instance, "user", None)
+
+        if user:
+            self._build_entity_choices(user)
+
+        # Add color swatches to color choices
+        color_field = self.fields.get("color_name")
+        if color_field:
+            from django.utils.safestring import mark_safe
+
+            new_choices = []
+            for color_name, hex_color in EntityColorMapping.EVENT_COLORS.items():
+                label = mark_safe(
+                    f'<span style="display:inline-block;width:16px;height:16px;'
+                    f"background-color:{hex_color};border:1px solid #999;"
+                    f"border-radius:3px;margin-right:8px;vertical-align:middle;"
+                    f'"></span>{color_name}'
+                )
+                new_choices.append((color_name, label))
+            color_field.choices = new_choices
+
+        # If editing existing mapping, set initial value
+        if self.instance and self.instance.pk:
+            self.fields["entity"].initial = (
+                f"{self.instance.entity_type}:{self.instance.entity_id}"
+            )
+
+    def _build_entity_choices(self, user):
+        """Build grouped choices from user's Toggl entities."""
+        choices = [("", "-- Select an entity --")]
+
+        projects = TogglProject.objects.filter(user=user, active=True).order_by("name")
+        if projects:
+            choices.append(("Projects", [(f"project:{p.toggl_id}", p.name) for p in projects]))
+
+        tags = TogglTag.objects.filter(user=user).order_by("name")
+        if tags:
+            choices.append(("Tags", [(f"tag:{t.toggl_id}", t.name) for t in tags]))
+
+        workspaces = TogglWorkspace.objects.filter(user=user).order_by("name")
+        if workspaces:
+            choices.append(("Workspaces", [(f"workspace:{w.toggl_id}", w.name) for w in workspaces]))
+
+        orgs = TogglOrganization.objects.filter(user=user).order_by("name")
+        if orgs:
+            choices.append(("Organizations", [(f"organization:{o.toggl_id}", o.name) for o in orgs]))
+
+        self.fields["entity"].choices = choices
+
+    def clean_entity(self):
+        value = self.cleaned_data.get("entity")
+        if not value:
+            raise forms.ValidationError("Please select an entity")
+        try:
+            entity_type, entity_id = value.split(":", 1)
+            self.cleaned_data["_entity_type"] = entity_type
+            self.cleaned_data["_entity_id"] = int(entity_id)
+        except (ValueError, TypeError):
+            raise forms.ValidationError("Invalid entity selection")
+        return value
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        entity_type = self.cleaned_data.get("_entity_type")
+        entity_id = self.cleaned_data.get("_entity_id")
+        instance.entity_type = entity_type
+        instance.entity_id = entity_id
+
+        model_by_type = {
+            "project": TogglProject,
+            "tag": TogglTag,
+            "workspace": TogglWorkspace,
+            "organization": TogglOrganization,
+        }
+        Model = model_by_type.get(entity_type)
+        entity = Model.objects.filter(user=instance.user, toggl_id=entity_id).first()
+        instance.entity_name = entity.name if entity else f"{entity_type}:{entity_id}"
+
+        if commit:
+            instance.save()
+        return instance
+
+
+@admin.register(EntityColorMapping)
+class ColorMappingAdmin(UserScopedAdmin):
+    form = ColorMappingForm
+    list_display = [
+        "entity_type",
+        "entity_name",
+        "color_display",
+        "process_order",
+    ]
+    list_filter = ["entity_type", "color_name"]
+    search_fields = ["entity_name"]
+    ordering = ["entity_type", "process_order", "entity_name"]
+    actions = ["apply_mappings"]
+
+    @admin.display(description="Color")
+    def color_display(self, obj):
+        hex_color = obj.get_color_hex()
+        if hex_color:
+            return format_html(
+                '<span style="display:inline-block;width:20px;height:20px;'
+                "background-color:{};border:1px solid #ccc;border-radius:3px;"
+                'vertical-align:middle;margin-right:5px;"></span> {}',
+                hex_color,
+                obj.color_name,
+            )
+        return "-"
+
+    @admin.action(description="Apply color mappings to past time entries")
+    def apply_mappings(self, request, queryset):
+        """
+        Apply color mappings to existing synced time entries.
+
+        Iterates through mappings from high to low process_order, so that
+        high priority (high process_order) mappings apply last and override
+        lower priority mappings.
+        """
+        from django_q.tasks import async_task
+
+        user = request.user
+
+        all_mappings = EntityColorMapping.objects.filter(user=user).order_by(
+            "-process_order"
+        )
+
+        if not all_mappings.exists():
+            messages.warning(request, "No mappings configured")
+            return
+
+        total_tasks = 0
+
+        for mapping in all_mappings:
+            matching_entries = mapping.find_matching_entries()
+
+            if not matching_entries.exists():
+                continue
+
+            for entry in matching_entries:
+                async_task(
+                    "sync.tasks.apply_color_to_entry",
+                    entry.id,
+                    mapping.get_color_id(),
+                    task_name=f"apply_color_{entry.id}",
+                )
+                total_tasks += 1
+
+        messages.success(
+            request,
+            f"Scheduled {total_tasks} tasks to apply color mappings. "
+            f"High priority (high process_order) mappings will apply last.",
+        )
+
+    def get_form(self, request, obj=None, **kwargs):
+        Form = super().get_form(request, obj, **kwargs)
+
+        class FormWithUser(Form):
+            def __init__(self, *args, **form_kwargs):
+                form_kwargs["user"] = request.user
+                super().__init__(*args, **form_kwargs)
+
+        return FormWithUser
 
 
 # =============================================================================

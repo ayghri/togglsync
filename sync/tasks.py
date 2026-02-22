@@ -13,6 +13,7 @@ from .models import TogglTimeEntry
 from .models import TogglOrganization
 from .models import TogglWorkspace, TogglProject
 from .models import TogglTag, check_unknown_entities
+from .models import resolve_color
 from .services import GoogleCalendarService
 from .services import TogglService, TogglAPIError
 from .services import GoogleCalendarError
@@ -197,7 +198,8 @@ def _handle_created(time_entry: dict, user: User):
     gcal = GoogleCalendarService(user=user)
     calendar_id = gcal.ensure_toggl_calendar()
 
-    gcal_data = db_entry.get_gcal_data()
+    color_id = resolve_color(user, time_entry)
+    gcal_data = db_entry.get_gcal_data(color_id=color_id)
     is_running = not db_entry.end_time
 
     gcal.create_event(
@@ -229,7 +231,8 @@ def _handle_updated(time_entry: dict, user: User):
     gcal = GoogleCalendarService(user=user)
     calendar_id = gcal.ensure_toggl_calendar()
 
-    gcal_data = db_entry.get_gcal_data()
+    color_id = resolve_color(user, time_entry)
+    gcal_data = db_entry.get_gcal_data(color_id=color_id)
 
     # Find existing event by iCalUID
     current_event = gcal.find_event_by_ical_uid(
@@ -298,6 +301,65 @@ def _handle_deleted(time_entry: dict, user: User):
         logger.debug(f"Event {entry_id} not found in calendar, already deleted")
 
     logger.info(f"Entry {entry_id} marked for deletion (kept in database)")
+
+
+def apply_color_to_entry(entry_id: int, color_id: str):
+    """
+    Apply a color mapping to a synced time entry.
+
+    Args:
+        entry_id: TogglTimeEntry database ID
+        color_id: Google Calendar color ID (1-11) to apply
+    """
+    try:
+        entry = TogglTimeEntry.objects.get(id=entry_id)
+    except TogglTimeEntry.DoesNotExist:
+        logger.error(f"Entry not found: {entry_id}")
+        return
+
+    if not entry.synced:
+        logger.debug(f"Skipping entry {entry.toggl_id}: not synced to Google")
+        return
+
+    user = entry.user
+    calendar_id = user.credentials.google_calendar_id
+    if not calendar_id:
+        logger.debug(f"No calendar configured for user {user.username}")
+        return
+
+    gcal = GoogleCalendarService(user=user)
+
+    try:
+        event = gcal.find_event_by_ical_uid(
+            calendar_id=calendar_id,
+            ical_uid=entry.gcal_event_id,
+        )
+
+        if not event:
+            logger.warning(
+                f"Event {entry.gcal_event_id} not found, marking as not synced"
+            )
+            entry.synced = False
+            entry.save(update_fields=["synced"])
+            return
+
+        gcal.update_event(
+            calendar_id=calendar_id,
+            event_id=event["id"],
+            color_id=color_id,
+        )
+        logger.info(f"Applied color {color_id} to entry {entry.toggl_id}")
+
+    except GoogleCalendarError as e:
+        if "404" in str(e) or "Not Found" in str(e):
+            logger.warning(f"Event not found for entry {entry.toggl_id}, marking as not synced")
+            entry.synced = False
+            entry.save(update_fields=["synced"])
+        else:
+            logger.error(f"Failed to apply color to entry {entry.toggl_id}: {e}")
+    except Exception as e:
+        logger.exception(f"Unexpected error applying color to entry {entry.toggl_id}")
+        raise
 
 
 def sync_toggl_metadata_for_user(request, user):

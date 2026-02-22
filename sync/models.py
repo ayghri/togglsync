@@ -199,9 +199,12 @@ class TogglTimeEntry(UserScopedModel, models.Model):
     def gcal_event_id(self) -> str:
         return "toggl" + str(self.toggl_id)
 
-    def get_gcal_data(self) -> dict:
+    def get_gcal_data(self, color_id: str | None = None) -> dict:
         """
         Prepare all data needed for Google Calendar event creation/update.
+
+        Args:
+            color_id: Optional color ID for the event (from color mapping)
 
         Returns:
             Dictionary with event_id, summary, start, end, description, color_id
@@ -239,8 +242,11 @@ class TogglTimeEntry(UserScopedModel, models.Model):
             # Running entry: use start + 1 minute as placeholder
             end = start + timedelta(minutes=1)
 
-        # Grey for running entries, no color for completed
-        event_color_id = "8" if not self.end_time else None
+        # Grey for running entries, otherwise use mapped color
+        if not self.end_time:
+            event_color_id = "8"
+        else:
+            event_color_id = color_id
 
         # Build summary
         summary = self.description or "(No description)"
@@ -257,6 +263,178 @@ class TogglTimeEntry(UserScopedModel, models.Model):
     def __str__(self):
         status = "synced" if self.synced else "pending"
         return f'Entry {self.id}: {self.description[:50] or "(no description)"} ({status})'
+
+
+class EntityColorMapping(UserScopedModel, models.Model):
+    """Maps Toggl entities (projects, tags, etc.) to Google Calendar event colors."""
+
+    class EntityType(models.TextChoices):
+        TAG = ("tag", "Tag")
+        PROJECT = ("project", "Project")
+        WORKSPACE = ("workspace", "Workspace")
+        ORGANIZATION = ("organization", "Organization")
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="color_mappings"
+    )
+    entity_type = models.CharField(max_length=20, choices=EntityType.choices)
+    entity_id = models.BigIntegerField()
+    entity_name = models.CharField(max_length=255, help_text="for display")
+    process_order = models.IntegerField(unique=True, help_text="lower = higher priority")
+
+    EVENT_COLORS = {
+        "Lavender": "#a4bdfc",
+        "Sage": "#7ae7bf",
+        "Grape": "#dbadff",
+        "Flamingo": "#ff887c",
+        "Banana": "#fbd75b",
+        "Tangerine": "#ffb878",
+        "Peacock": "#46d6db",
+        "Graphite": "#e1e1e1",
+        "Blueberry": "#5484ed",
+        "Basil": "#51b749",
+        "Tomato": "#dc2127",
+    }
+
+    COLOR_ID_MAP = {
+        "Lavender": "1",
+        "Sage": "2",
+        "Grape": "3",
+        "Flamingo": "4",
+        "Banana": "5",
+        "Tangerine": "6",
+        "Peacock": "7",
+        "Graphite": "8",
+        "Blueberry": "9",
+        "Basil": "10",
+        "Tomato": "11",
+    }
+
+    COLOR_CHOICES = list(EVENT_COLORS.items())
+
+    color_name = models.CharField(
+        max_length=20,
+        choices=COLOR_CHOICES,
+        default="Lavender",
+        help_text="Color for calendar events",
+    )
+
+    def get_color_hex(self):
+        return self.EVENT_COLORS[str(self.color_name)]
+
+    def get_color_id(self):
+        """Get Google Calendar color ID for this mapping's color."""
+        return self.COLOR_ID_MAP[str(self.color_name)]
+
+    def find_matching_entries(self):
+        """Find time entries that match this mapping's entity."""
+        base_query = TogglTimeEntry.objects.filter(
+            user=self.user,
+            synced=True,
+            pending_deletion=False,
+        )
+
+        if self.entity_type == self.EntityType.PROJECT:
+            return base_query.filter(project_id=self.entity_id)
+
+        elif self.entity_type == self.EntityType.TAG:
+            return base_query.filter(tag_ids__contains=self.entity_id)
+
+        elif self.entity_type == self.EntityType.WORKSPACE:
+            project_ids = TogglProject.objects.filter(
+                user=self.user,
+                workspace__toggl_id=self.entity_id,
+            ).values_list("toggl_id", flat=True)
+            return base_query.filter(project_id__in=project_ids)
+
+        elif self.entity_type == self.EntityType.ORGANIZATION:
+            project_ids = TogglProject.objects.filter(
+                user=self.user,
+                workspace__organization__toggl_id=self.entity_id,
+            ).values_list("toggl_id", flat=True)
+            return base_query.filter(project_id__in=project_ids)
+
+        return base_query.none()
+
+    class Meta:
+        unique_together = ["user", "entity_type", "entity_id"]
+        ordering = ["process_order"]
+        verbose_name = "Color Mapping"
+        verbose_name_plural = "Color Mappings"
+
+    def __str__(self):
+        return f"{self.entity_type}: {self.entity_name} -> {self.color_name}"
+
+
+def resolve_color(user, time_entry: dict) -> str | None:
+    """
+    Resolve event color for a time entry based on priority mappings.
+
+    Priority order (highest to lowest):
+    1. Tags - if any tag has a mapping, use that (process_order breaks ties)
+    2. Project - if project has a mapping
+    3. Workspace - if workspace has a mapping
+    4. Organization - if organization has a mapping (via workspace)
+
+    Returns Google Calendar color ID (1-11) or None.
+    """
+    ECM = EntityColorMapping
+
+    # 1. Check tags
+    tag_ids = time_entry.get("tag_ids") or time_entry.get("tags", [])
+    if tag_ids:
+        if isinstance(tag_ids[0], str):
+            tag_objects = TogglTag.objects.filter(user=user, name__in=tag_ids)
+            tag_ids = [t.toggl_id for t in tag_objects]
+        if tag_ids:
+            mapping = (
+                ECM.objects.filter(
+                    user=user,
+                    entity_type=ECM.EntityType.TAG,
+                    entity_id__in=tag_ids,
+                )
+                .order_by("process_order")
+                .first()
+            )
+            if mapping:
+                return mapping.get_color_id()
+
+    # 2. Check project
+    project_id = time_entry.get("project_id") or time_entry.get("pid")
+    if project_id:
+        mapping = ECM.objects.filter(
+            user=user,
+            entity_type=ECM.EntityType.PROJECT,
+            entity_id=project_id,
+        ).first()
+        if mapping:
+            return mapping.get_color_id()
+
+    # 3. Check workspace
+    workspace_id = time_entry.get("workspace_id") or time_entry.get("wid")
+    if workspace_id:
+        mapping = ECM.objects.filter(
+            user=user,
+            entity_type=ECM.EntityType.WORKSPACE,
+            entity_id=workspace_id,
+        ).first()
+        if mapping:
+            return mapping.get_color_id()
+
+        # 4. Check organization (via workspace)
+        ws = TogglWorkspace.objects.filter(
+            user=user, toggl_id=workspace_id
+        ).first()
+        if ws and ws.organization_id:
+            mapping = ECM.objects.filter(
+                user=user,
+                entity_type=ECM.EntityType.ORGANIZATION,
+                entity_id=ws.organization.toggl_id,
+            ).first()
+            if mapping:
+                return mapping.get_color_id()
+
+    return None
 
 
 def check_unknown_entities(time_entry: dict, user) -> dict:
