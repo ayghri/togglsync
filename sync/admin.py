@@ -690,6 +690,23 @@ class EntryAdmin(UserScopedAdmin):
     ]
     date_hierarchy = "start_time"
     ordering = ["-start_time"]
+    actions = ["sync_to_google_calendar"]
+
+    @admin.action(description="Sync selected entries to Google Calendar")
+    def sync_to_google_calendar(self, request, queryset):
+        from django_q.tasks import async_task
+
+        count = 0
+        for entry in queryset.filter(user=request.user):
+            async_task(
+                "sync.tasks.process_time_entry_event",
+                entry.user_id,
+                entry.toggl_id,
+                task_name=f"manual_sync_{entry.toggl_id}",
+            )
+            count += 1
+
+        messages.info(request, f"Queued {count} entries for sync.")
 
     def short_description(self, obj):
         desc = obj.description or "(no description)"
