@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 class UserScopedAdmin(admin.ModelAdmin):
     """
     Base admin that restricts users to only their own data.
+    Bypasses Django's model-level permissions since data isolation
+    is enforced by get_queryset and per-object checks.
     """
 
     def get_queryset(self, request):
@@ -32,24 +34,27 @@ class UserScopedAdmin(admin.ModelAdmin):
             return qs
         return qs.filter(user=request.user)
 
+    def has_module_permission(self, request):
+        return request.user.is_staff
+
     def has_view_permission(self, request, obj=None):
-        if obj is not None:
-            if obj.user_id != request.user.id:
-                return False
-        return super().has_view_permission(request, obj)
+        if obj is not None and obj.user_id != request.user.id:
+            return False
+        return request.user.is_staff
+
+    def has_add_permission(self, request):
+        return request.user.is_staff
 
     def has_change_permission(self, request, obj=None):
-        if obj is not None:
-            if obj.user_id != request.user.id:
-                return False
-        return super().has_change_permission(request, obj)
+        if obj is not None and obj.user_id != request.user.id:
+            return False
+        return request.user.is_staff
 
     def has_delete_permission(self, request, obj=None):
         """Block deleting other users' objects."""
-        if obj is not None:
-            if obj.user_id != request.user.id:
-                return False
-        return super().has_delete_permission(request, obj)
+        if obj is not None and obj.user_id != request.user.id:
+            return False
+        return request.user.is_staff
 
     def save_model(self, request, obj, form, change):
         """Auto-assign user on create, prevent user change on edit."""
