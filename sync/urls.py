@@ -13,6 +13,10 @@ urlpatterns = [
     # Health check
     path('health/', views.health_check, name='health_check'),
 
+    # Legal pages (required for Google OAuth consent screen)
+    path('privacy/', views.privacy_policy, name='privacy_policy'),
+    path('terms/', views.terms_of_service, name='terms_of_service'),
+
     # Webhook endpoint with token for user identification
     path('webhook/toggl/<str:webhook_token>/', views.toggl_webhook, name='toggl_webhook'),
 

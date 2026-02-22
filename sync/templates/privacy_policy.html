@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Privacy Policy - Toggl Sync</title>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    Oxygen, Ubuntu, sans-serif;
+                background: #f5f5f5;
+                margin: 0;
+                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                max-width: 700px;
+                width: 100%;
+                margin-top: 20px;
+                align-self: flex-start;
+            }
+            h1 {
+                margin: 0 0 10px 0;
+                color: #333;
+            }
+            h2 {
+                color: #444;
+                margin-top: 30px;
+            }
+            p, li {
+                color: #555;
+                line-height: 1.7;
+            }
+            a {
+                color: #417690;
+            }
+            .back-link {
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Privacy Policy</h1>
+            <p><strong>Last updated:</strong> February 2026</p>
+
+            <h2>What This App Does</h2>
+            <p>
+                Toggl Sync is a self-hosted application that synchronizes your
+                Toggl Track time entries to your Google Calendar. It runs on
+                infrastructure you control.
+            </p>
+
+            <h2>Data We Access</h2>
+            <ul>
+                <li>
+                    <strong>Toggl Track:</strong> Your time entries, projects,
+                    tags, workspaces, and organizations via the Toggl API using
+                    your API token.
+                </li>
+                <li>
+                    <strong>Google Calendar:</strong> Your calendar list and
+                    calendar events via the Google Calendar API using OAuth 2.0.
+                    We request the <code>calendar.events</code> and
+                    <code>calendar.readonly</code> scopes.
+                </li>
+            </ul>
+
+            <h2>How Data Is Used</h2>
+            <p>
+                Your data is used solely to create, update, and delete Google
+                Calendar events that mirror your Toggl time entries. No data is
+                used for any other purpose.
+            </p>
+
+            <h2>Data Storage</h2>
+            <ul>
+                <li>
+                    All data is stored locally on your self-hosted instance in a
+                    SQLite database.
+                </li>
+                <li>
+                    Google OAuth credentials (access and refresh tokens) are
+                    stored in the database to maintain your connection.
+                </li>
+                <li>
+                    No data is transmitted to any third party beyond the Toggl
+                    and Google APIs required for synchronization.
+                </li>
+            </ul>
+
+            <h2>Data Sharing</h2>
+            <p>
+                This application does not share, sell, or transfer your data to
+                any third parties. Data flows only between your self-hosted
+                instance, Toggl Track, and Google Calendar.
+            </p>
+
+            <h2>Data Retention</h2>
+            <p>
+                Your data is retained in the local database for as long as you
+                use the application. You can disconnect your Google account or
+                delete your data at any time through the application interface.
+            </p>
+
+            <h2>Security</h2>
+            <p>
+                As a self-hosted application, security is managed by the
+                operator. OAuth tokens are stored in the database and webhook
+                payloads are verified using HMAC signatures.
+            </p>
+
+            <h2>Contact</h2>
+            <p>
+                This is a self-hosted application. Contact the administrator of
+                your instance for any privacy concerns.
+            </p>
+
+            <div class="back-link">
+                <a href="{% url 'sync:landing' %}">&larr; Back to Toggl Sync</a>
+            </div>
+        </div>
+    </body>
+</html>

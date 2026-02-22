@@ -61,6 +61,16 @@ def health_check(request):
     return JsonResponse({"status": "ok"})
 
 
+def privacy_policy(request):
+    """Privacy policy page for Google OAuth consent screen."""
+    return render(request, "privacy_policy.html")
+
+
+def terms_of_service(request):
+    """Terms of service page for Google OAuth consent screen."""
+    return render(request, "terms_of_service.html")
+
+
 @csrf_exempt
 @require_POST
 def toggl_webhook(request, webhook_token: str):

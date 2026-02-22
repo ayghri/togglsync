@@ -104,6 +104,20 @@
                 padding-top: 20px;
                 border-top: 1px solid #eee;
             }
+            .footer {
+                margin-top: 30px;
+                padding-top: 15px;
+                border-top: 1px solid #eee;
+                text-align: center;
+                font-size: 13px;
+            }
+            .footer a {
+                color: #888;
+                text-decoration: none;
+            }
+            .footer a:hover {
+                color: #417690;
+            }
         </style>
     </head>
     <body>
@@ -214,6 +228,12 @@
             <p>Sign in to configure your Toggl to Google Calendar sync.</p>
             <a href="/admin/login/?next=/" class="btn btn-primary">Sign In</a>
             {% endif %}
+
+            <div class="footer">
+                <a href="{% url 'sync:privacy_policy' %}">Privacy Policy</a>
+                &middot;
+                <a href="{% url 'sync:terms_of_service' %}">Terms of Service</a>
+            </div>
         </div>
     </body>
 </html>
