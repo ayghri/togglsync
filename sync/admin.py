@@ -243,6 +243,14 @@ class ColorMappingForm(forms.ModelForm):
         if self._user:
             self._build_entity_choices(self._user)
 
+        # Default process_order to max+1 for new mappings
+        if not self.instance.pk:
+            from django.db.models import Max
+            max_order = EntityColorMapping.objects.aggregate(
+                m=Max("process_order")
+            )["m"]
+            self.initial["process_order"] = (max_order or 0) + 1
+
         # Add color swatches to color choices
         color_field = self.fields.get("color_name")
         if color_field:
@@ -725,9 +733,6 @@ class EntryAdmin(UserScopedAdmin):
             return "Pending"
 
     def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
         return False
 
 
