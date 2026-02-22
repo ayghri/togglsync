@@ -31,8 +31,6 @@ class GoogleCalendarService:
 
         Args:
             user: Django User to load credentials from DB
-            credentials_json: Raw credentials JSON string (alternative to user)
-            timezone: Timezone for events (defaults to user's config or settings)
         """
         self.user = user
         self.scopes = settings.GOOGLE_CALENDAR_SCOPES
@@ -70,23 +68,40 @@ class GoogleCalendarService:
                 update_fields=["gauth_credentials_json", "updated_at"]
             )
 
-    def get_all_calendars(self) -> list[dict]:
-        """List all calendars accessible to the user."""
-        self._refresh_maybe()
+    def ensure_toggl_calendar(self) -> str:
+        """
+        Ensure the Toggl calendar exists, create if not.
 
-        calendars = []
-        page_token = None
+        Returns:
+            The Google Calendar ID for the Toggl calendar.
+        """
+        user_creds = self._get_user_creds()
 
-        while True:
-            result = (
-                self.service.calendarList().list(pageToken=page_token).execute()
+        # If we have a stored calendar ID, verify it still exists
+        if user_creds.google_calendar_id:
+            cal = self.get_calendar(user_creds.google_calendar_id)
+            if cal:
+                return user_creds.google_calendar_id
+            logger.warning(
+                f"Stored calendar {user_creds.google_calendar_id} not found, recreating"
             )
-            calendars.extend(result.get("items", []))
-            page_token = result.get("nextPageToken")
-            if not page_token:
-                break
 
-        return calendars
+        # Create a new "Toggl" calendar
+        self._refresh_maybe()
+        cal = self.service.calendars().insert(
+            body={
+                "summary": "Toggl",
+                "description": "Time entries synced from Toggl Track",
+                "timeZone": self.timezone,
+            }
+        ).execute()
+
+        calendar_id = cal["id"]
+        user_creds.google_calendar_id = calendar_id
+        user_creds.save(update_fields=["google_calendar_id", "updated_at"])
+        logger.info(f"Created Toggl calendar {calendar_id} for {self.user.username}")
+
+        return calendar_id
 
     def get_calendar(self, calendar_id: str) -> dict | None:
         """Get a calendar by ID."""
@@ -248,25 +263,3 @@ class GoogleCalendarService:
             return items[0] if items else None
         except HttpError as e:
             raise GoogleCalendarError(f"Failed to find event: {e}") from e
-
-    def move_event(
-        self,
-        source_calendar_id: str,
-        destination_calendar_id: str,
-        event_id: str,
-    ) -> dict:
-        """Move an event from one calendar to another."""
-        self._refresh_maybe()
-
-        try:
-            return (
-                self.service.events()
-                .move(
-                    calendarId=source_calendar_id,
-                    eventId=event_id,
-                    destination=destination_calendar_id,
-                )
-                .execute()
-            )
-        except HttpError as e:
-            raise GoogleCalendarError(f"Failed to move event: {e}") from e

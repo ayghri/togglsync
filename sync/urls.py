@@ -26,6 +26,5 @@ urlpatterns = [
     path('oauth/google/disconnect/', views.google_oauth_disconnect, name='google_oauth_disconnect'),
 
     # Action endpoints
-    path('actions/import-calendars/', views.import_calendars, name='import_calendars'),
     path('actions/sync-toggl/', views.sync_toggl_metadata, name='sync_toggl_metadata'),
 ]

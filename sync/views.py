@@ -15,7 +15,7 @@ from google_auth_oauthlib.flow import Flow
 
 from .models import UserCredentials
 from .models import TogglWorkspace, TogglTimeEntry
-from .tasks import import_google_calendars_for_user, sync_toggl_metadata_for_user
+from .tasks import sync_toggl_metadata_for_user
 from .utils import get_google_credentials, verify_signature, parse_datetime
 
 logger = logging.getLogger(__name__)
@@ -48,9 +48,6 @@ def home_page(request):
                     context["google_token_masked"] = token[:8] + "****" + token[-8:] if len(token) > 16 else "****"
             except Exception:
                 pass
-
-        # Calendars
-        context["calendars"] = request.user.calendars.all()
 
     return render(request, "user_dashboard.html", context)
 
@@ -340,23 +337,6 @@ def google_oauth_disconnect(request):
     except Exception as e:
         logger.exception(f"Error disconnecting Google Calendar: {e}")
         messages.error(request, f"Error disconnecting: {e}")
-
-    return redirect("sync:landing")
-
-
-@login_required
-def import_calendars(request):
-    """Import calendars from Google Calendar API."""
-    creds = request.user.credentials
-    if not creds.is_connected:
-        messages.error(request, "Google Calendar not connected")
-        return redirect("sync:landing")
-
-    try:
-        import_google_calendars_for_user(request, request.user)
-    except Exception as e:
-        logger.exception(f"Error importing calendars: {e}")
-        messages.error(request, f"Error importing calendars: {e}")
 
     return redirect("sync:landing")
 

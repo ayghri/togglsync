@@ -179,32 +179,8 @@
             </a>
             {% endif %}
 
-            <!-- Calendars Status -->
-            {% if calendars %}
-            <div class="status-section status-ok">
-                <div class="status-title">Calendars</div>
-                <div class="status-detail">
-                    {{ calendars.count }} calendar(s) imported
-                </div>
-            </div>
-            {% elif google_config %}
-            <div class="status-section status-warning">
-                <div class="status-title">Calendars</div>
-                <div class="status-detail">No calendars imported yet</div>
-            </div>
-            {% endif %}
-
             <div class="actions">
                 <a href="/admin/" class="btn btn-primary">Open Admin</a>
-
-                {% if google_config %}
-                <a
-                    href="{% url 'sync:import_calendars' %}"
-                    class="btn btn-google"
-                    title="Import all calendars from Google Calendar"
-                    >Import Calendars</a
-                >
-                {% endif %}
 
                 {% if toggl_config and toggl_config.toggl_api_token %}
                 <a

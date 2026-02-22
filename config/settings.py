@@ -137,8 +137,7 @@ GOOGLE_REDIRECT_URI = f"https://{WEBHOOK_DOMAIN}/oauth/google/callback/"
 GOOGLE_CALENDAR_TIMEZONE = os.getenv("GOOGLE_CALENDAR_TIMEZONE", "UTC")
 
 GOOGLE_CALENDAR_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.app.created",
 ]
 
 
