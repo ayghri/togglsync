@@ -70,20 +70,25 @@ class GoogleCalendarService:
 
     def ensure_toggl_calendar(self) -> str:
         """
-        Ensure the Toggl calendar exists, create if not.
+        Ensure the Toggl calendar exists and is visible to the user.
+
+        With calendar.app.created scope, the app owns the calendar. If the
+        user deletes it from their Google Calendar UI, the API can still
+        access it (soft delete). We check calendarList to confirm it's
+        actually visible to the user, and recreate if not.
 
         Returns:
             The Google Calendar ID for the Toggl calendar.
         """
         user_creds = self._get_user_creds()
 
-        # If we have a stored calendar ID, verify it still exists
+        # If we have a stored calendar ID, verify it's visible to the user
         if user_creds.google_calendar_id:
-            cal = self.get_calendar(user_creds.google_calendar_id)
-            if cal:
+            if self._calendar_in_list(user_creds.google_calendar_id):
                 return user_creds.google_calendar_id
             logger.warning(
-                f"Stored calendar {user_creds.google_calendar_id} not found, recreating"
+                f"Stored calendar {user_creds.google_calendar_id} not found "
+                f"in user's calendar list, recreating"
             )
 
         # Create a new "Toggl" calendar
@@ -102,6 +107,17 @@ class GoogleCalendarService:
         logger.info(f"Created Toggl calendar {calendar_id} for {self.user.username}")
 
         return calendar_id
+
+    def _calendar_in_list(self, calendar_id: str) -> bool:
+        """Check if a calendar is in the user's calendar list (visible to them)."""
+        self._refresh_maybe()
+        try:
+            self.service.calendarList().get(calendarId=calendar_id).execute()
+            return True
+        except HttpError as e:
+            if e.resp.status == 404:
+                return False
+            raise GoogleCalendarError(f"Failed to check calendar list: {e}") from e
 
     def get_calendar(self, calendar_id: str) -> dict | None:
         """Get a calendar by ID."""

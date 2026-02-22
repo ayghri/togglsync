@@ -285,12 +285,13 @@ def _handle_deleted(time_entry: dict, user: User):
         logger.debug(f"Entry {entry_id} not found in synced entries")
         return
 
-    calendar_id = user.credentials.google_calendar_id
-    if not calendar_id:
-        logger.debug(f"No calendar configured for user {user.username}, skipping delete")
+    if not user.credentials.is_connected:
+        logger.debug(f"Google Calendar not connected for {user.username}, skipping delete")
         return
 
     gcal = GoogleCalendarService(user=user)
+    calendar_id = gcal.ensure_toggl_calendar()
+
     event = gcal.find_event_by_ical_uid(
         calendar_id=calendar_id,
         ical_uid=db_entry.gcal_event_id,
@@ -328,12 +329,12 @@ def apply_color_to_entry(entry_id: int, color_id: str):
         return
 
     user = entry.user
-    calendar_id = user.credentials.google_calendar_id
-    if not calendar_id:
-        logger.debug(f"No calendar configured for user {user.username}")
+    if not user.credentials.is_connected:
+        logger.debug(f"Google Calendar not connected for {user.username}")
         return
 
     gcal = GoogleCalendarService(user=user)
+    calendar_id = gcal.ensure_toggl_calendar()
 
     try:
         event = gcal.find_event_by_ical_uid(
