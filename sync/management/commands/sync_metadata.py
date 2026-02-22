@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from sync.models import (
-    TogglConfig,
+    UserCredentials,
     TogglOrganization,
     TogglProject,
     TogglTag,
@@ -29,7 +29,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--api-token',
             type=str,
-            help='Toggl API token (default: from user config in database)',
+            help='Toggl API token (default: from user credentials in database)',
         )
 
     def handle(self, *args, **options):
@@ -40,10 +40,10 @@ class Command(BaseCommand):
         except User.DoesNotExist:
             raise CommandError(f'User not found: {username}')
 
-        # Get config from database
-        toggl_config = TogglConfig.get_for_user(user)
+        # Get credentials from database
+        creds = user.credentials
 
-        api_token = options.get('api_token') or (toggl_config.api_token if toggl_config else None)
+        api_token = options.get('api_token') or creds.toggl_api_token
 
         if not api_token:
             raise CommandError(
@@ -62,9 +62,8 @@ class Command(BaseCommand):
             raise CommandError(f'Failed to sync metadata: {e}')
 
         # Update last sync time
-        if toggl_config:
-            toggl_config.last_metadata_sync = timezone.now()
-            toggl_config.save(update_fields=['last_metadata_sync'])
+        creds.last_toggl_metadata_sync = timezone.now()
+        creds.save(update_fields=['last_toggl_metadata_sync'])
 
         self.stdout.write(self.style.SUCCESS(f'Metadata sync completed for {username}'))
 
@@ -96,7 +95,6 @@ class Command(BaseCommand):
             # Look up organization object if organization_id is provided
             org = None
             if ws.get('organization_id'):
-                from sync.models import TogglOrganization
                 org = TogglOrganization.objects.filter(
                     user=self.user, toggl_id=ws['organization_id']
                 ).first()
@@ -125,27 +123,15 @@ class Command(BaseCommand):
             self.stdout.write(f'Syncing data for workspace: {workspace.name}')
 
             # Sync projects
-            self.sync_projects(toggl, workspace.toggl_id)
+            self.sync_projects(toggl, workspace)
 
             # Sync tags
-            self.sync_tags(toggl, workspace.toggl_id)
+            self.sync_tags(toggl, workspace)
 
-    def sync_projects(self, toggl: TogglService, workspace_id: int):
+    def sync_projects(self, toggl: TogglService, workspace: TogglWorkspace):
         """Sync projects for a workspace."""
-        from sync.models import TogglWorkspace
-
-        # Look up workspace object
-        workspace = TogglWorkspace.objects.filter(
-            user=self.user, toggl_id=workspace_id
-        ).first()
-        if not workspace:
-            self.stdout.write(
-                self.style.WARNING(f'  Workspace {workspace_id} not found')
-            )
-            return
-
         try:
-            projects = toggl.get_projects(workspace_id)
+            projects = toggl.get_projects(workspace.toggl_id)
         except TogglAPIError as e:
             self.stdout.write(
                 self.style.WARNING(f'  Failed to sync projects: {e}')
@@ -168,22 +154,10 @@ class Command(BaseCommand):
 
         self.stdout.write(f'  Synced {count} projects')
 
-    def sync_tags(self, toggl: TogglService, workspace_id: int):
+    def sync_tags(self, toggl: TogglService, workspace: TogglWorkspace):
         """Sync tags for a workspace."""
-        from sync.models import TogglWorkspace
-
-        # Look up workspace object
-        workspace = TogglWorkspace.objects.filter(
-            user=self.user, toggl_id=workspace_id
-        ).first()
-        if not workspace:
-            self.stdout.write(
-                self.style.WARNING(f'  Workspace {workspace_id} not found')
-            )
-            return
-
         try:
-            tags = toggl.get_tags(workspace_id)
+            tags = toggl.get_tags(workspace.toggl_id)
         except TogglAPIError as e:
             self.stdout.write(
                 self.style.WARNING(f'  Failed to sync tags: {e}')

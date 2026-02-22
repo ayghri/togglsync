@@ -228,6 +228,12 @@ def _handle_updated(time_entry: dict, user: User):
         logger.error(f"Entry {entry_id} not found in database")
         return
 
+    # If not yet synced, treat as create
+    if not db_entry.synced:
+        logger.debug(f"Entry {entry_id} not yet synced, treating as create")
+        _handle_created(time_entry, user)
+        return
+
     gcal = GoogleCalendarService(user=user)
     calendar_id = gcal.ensure_toggl_calendar()
 

@@ -238,10 +238,10 @@ class ColorMappingForm(forms.ModelForm):
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
 
-        user = user or getattr(self.instance, "user", None)
+        self._user = user or getattr(self.instance, "user", None)
 
-        if user:
-            self._build_entity_choices(user)
+        if self._user:
+            self._build_entity_choices(self._user)
 
         # Add color swatches to color choices
         color_field = self.fields.get("color_name")
@@ -313,7 +313,7 @@ class ColorMappingForm(forms.ModelForm):
             "organization": TogglOrganization,
         }
         Model = model_by_type.get(entity_type)
-        entity = Model.objects.filter(user=instance.user, toggl_id=entity_id).first()
+        entity = Model.objects.filter(user=self._user, toggl_id=entity_id).first()
         instance.entity_name = entity.name if entity else f"{entity_type}:{entity_id}"
 
         if commit:
