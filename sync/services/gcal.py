@@ -128,11 +128,21 @@ class GoogleCalendarService:
             )
         except HttpError as e:
             if e.resp.status == 409 and event_id:
-                logger.warning(f"Event with iCalUID {event_id} already exists, finding it")
+                logger.info(f"Event {event_id} already exists, updating instead")
                 existing = self.find_event_by_ical_uid(calendar_id, event_id)
                 if existing:
-                    logger.info(f"Found existing event: {existing['id']}")
-                    return existing
+                    return self.update_event(
+                        calendar_id=calendar_id,
+                        event_id=existing["id"],
+                        summary=summary,
+                        start=start,
+                        end=end,
+                        description=description,
+                        color_id=color_id,
+                    )
+                # Event exists (409) but not findable (different calendar or API lag)
+                logger.warning(f"Event {event_id} exists per 409 but not found via list, treating as synced")
+                return {"id": event_id, "status": "confirmed"}
             raise GoogleCalendarError(f"Failed to create event: {e}") from e
 
     def update_event(
@@ -201,7 +211,7 @@ class GoogleCalendarService:
         try:
             result = (
                 self.service.events()
-                .list(calendarId=calendar_id, iCalUID=ical_uid)
+                .list(calendarId=calendar_id, iCalUID=ical_uid, showDeleted=True)
                 .execute()
             )
             items = result.get("items", [])
