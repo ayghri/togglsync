@@ -146,10 +146,7 @@ def process_time_entry_event(user_id: int, entry_id: int):
         if entry.pending_deletion:
             _handle_deleted(time_entry, user)
         else:
-            if entry.synced:
-                _handle_updated(time_entry, user)
-            else:
-                _handle_created(time_entry, user)
+            _sync_to_calendar(time_entry, user)
 
         entry.synced = True
         entry.save(update_fields=["synced"])
@@ -172,7 +169,8 @@ def process_time_entry_event(user_id: int, entry_id: int):
         )
 
 
-def _handle_created(time_entry: dict, user: User):
+def _sync_to_calendar(time_entry: dict, user: User):
+    """Find event in Google Calendar and update it, or create if not found."""
     entry_id = time_entry.get("id")
     if not entry_id:
         logger.warning("Time entry missing ID")
@@ -189,79 +187,29 @@ def _handle_created(time_entry: dict, user: User):
 
     color_id = resolve_color(user, time_entry)
     gcal_data = db_entry.get_gcal_data(color_id=color_id)
-    is_running = not db_entry.end_time
 
-    try:
-        gcal.create_event(
-            calendar_id=calendar_id,
-            **gcal_data,
-        )
-    except GoogleCalendarError as e:
-        if "409" in str(e) or "already exists" in str(e):
-            logger.info(f"Entry {entry_id} already exists in calendar, updating instead")
-            _handle_updated(time_entry, user)
-            return
-        raise
-
-    db_entry.synced = True
-    db_entry.save(update_fields=["synced"])
-
-    logger.info(
-        f"Created calendar event for entry {entry_id} (user: {user.username}, running: {is_running})"
-    )
-
-
-def _handle_updated(time_entry: dict, user: User):
-    entry_id = time_entry.get("id")
-    if not entry_id:
-        logger.warning("Time entry missing ID")
-        return
-
-    try:
-        db_entry = TogglTimeEntry.objects.get(user=user, toggl_id=entry_id)
-    except TogglTimeEntry.DoesNotExist:
-        logger.error(f"Entry {entry_id} not found in database")
-        return
-
-    if not db_entry.synced:
-        logger.debug(f"Entry {entry_id} not yet synced, treating as create")
-        _handle_created(time_entry, user)
-        return
-
-    gcal = GoogleCalendarService(user=user)
-    calendar_id = gcal.ensure_toggl_calendar()
-
-    color_id = resolve_color(user, time_entry)
-    gcal_data = db_entry.get_gcal_data(color_id=color_id)
-
-    current_event = gcal.find_event_by_ical_uid(
+    existing = gcal.find_event_by_ical_uid(
         calendar_id=calendar_id,
         ical_uid=db_entry.gcal_event_id,
     )
 
-    if current_event:
+    if existing:
         gcal.update_event(
             calendar_id=calendar_id,
-            event_id=current_event["id"],
+            event_id=existing["id"],
             summary=gcal_data["summary"],
             start=gcal_data["start"],
             end=gcal_data["end"],
             description=gcal_data["description"],
             color_id=gcal_data["color_id"],
         )
+        logger.info(f"Updated calendar event for entry {entry_id} (user: {user.username})")
     else:
-        logger.info(f"Event {entry_id} not found in calendar, creating")
         gcal.create_event(
             calendar_id=calendar_id,
             **gcal_data,
         )
-
-    db_entry.synced = True
-    db_entry.save(update_fields=["synced"])
-
-    logger.info(
-        f"Updated calendar event for entry {entry_id} (user: {user.username})"
-    )
+        logger.info(f"Created calendar event for entry {entry_id} (user: {user.username})")
 
 
 def _handle_deleted(time_entry: dict, user: User):
