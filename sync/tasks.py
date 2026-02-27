@@ -34,12 +34,25 @@ def process_time_entry_event(user_id: int, entry_id: int):
         return
 
     logger.info(f"Processing entry {entry_id} (user: {user.username})")
+    logger.debug(
+        f"Entry {entry_id} state: desc={entry.description!r} "
+        f"start={entry.start_time} end={entry.end_time} "
+        f"synced={entry.synced} updated_at={entry.updated_at}"
+    )
 
     try:
         if entry.pending_deletion:
             _handle_deleted(entry)
         else:
             _sync_to_calendar(entry)
+
+        db_entry = TogglTimeEntry.objects.get(id=entry.id)
+        logger.debug(
+            f"Entry {entry_id} post-sync DB state: desc={db_entry.description!r} "
+            f"start={db_entry.start_time} end={db_entry.end_time} "
+            f"synced={db_entry.synced} updated_at={db_entry.updated_at} "
+            f"(task read updated_at={entry.updated_at})"
+        )
 
         updated = TogglTimeEntry.objects.filter(
             id=entry.id,
@@ -51,6 +64,8 @@ def process_time_entry_event(user_id: int, entry_id: int):
                 f"Entry {entry_id} was modified during sync, "
                 f"skipping synced=True (next task will handle it)"
             )
+        else:
+            logger.debug(f"Entry {entry_id} marked synced=True")
 
     except Exception as e:
         logger.exception(f"Error processing entry {entry_id}: {e}")

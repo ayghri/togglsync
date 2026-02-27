@@ -135,6 +135,14 @@ def toggl_webhook(request, webhook_token: str):
 
     logger.info(f"Webhook from {user.username}: {' '.join(log_parts)}")
 
+    start_raw = entry.get("start")
+    stop_raw = entry.get("stop")
+    duration_raw = entry.get("duration")
+    logger.debug(
+        f"Webhook payload detail: entry={entry_id} "
+        f"start={start_raw} stop={stop_raw} duration={duration_raw}"
+    )
+
     webhook_created_at = parse_datetime(payload.get("created_at"))
 
     if event_type == "deleted":

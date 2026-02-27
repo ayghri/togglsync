@@ -171,7 +171,7 @@ LOGGING = {
     "loggers": {
         "sync": {
             "handlers": ["console"],
-            "level": "DEBUG" if DEBUG else "INFO",
+            "level": "DEBUG" if DEBUG else os.getenv("SYNC_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
         "django.request": {
