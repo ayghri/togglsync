@@ -191,10 +191,17 @@ def _handle_created(time_entry: dict, user: User):
     gcal_data = db_entry.get_gcal_data(color_id=color_id)
     is_running = not db_entry.end_time
 
-    gcal.create_event(
-        calendar_id=calendar_id,
-        **gcal_data,
-    )
+    try:
+        gcal.create_event(
+            calendar_id=calendar_id,
+            **gcal_data,
+        )
+    except GoogleCalendarError as e:
+        if "409" in str(e) or "already exists" in str(e):
+            logger.info(f"Entry {entry_id} already exists in calendar, updating instead")
+            _handle_updated(time_entry, user)
+            return
+        raise
 
     db_entry.synced = True
     db_entry.save(update_fields=["synced"])
@@ -609,14 +616,23 @@ def validate_synced_events():
 
 
 def _reschedule_task(schedule_name: str, interval_seconds: int):
-    Schedule.objects.update_or_create(
-        name=schedule_name,
-        defaults={
-            "func": f"sync.tasks.{schedule_name}",
-            "schedule_type": Schedule.ONCE,
-            "next_run": timezone.now() + timezone.timedelta(seconds=interval_seconds),
-        }
-    )
+    import time
+    for attempt in range(3):
+        try:
+            Schedule.objects.update_or_create(
+                name=schedule_name,
+                defaults={
+                    "func": f"sync.tasks.{schedule_name}",
+                    "schedule_type": Schedule.ONCE,
+                    "next_run": timezone.now() + timezone.timedelta(seconds=interval_seconds),
+                }
+            )
+            return
+        except Exception as e:
+            if "locked" in str(e) and attempt < 2:
+                time.sleep(1)
+                continue
+            logger.warning(f"Failed to reschedule {schedule_name}: {e}")
 
 
 def ensure_periodic_schedules():
