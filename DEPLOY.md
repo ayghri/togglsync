@@ -112,7 +112,7 @@ systemctl --user enable --now togglsync
 | `DJANGO_ADMIN_PASSWORD` | No | - | Auto-create/update password |
 | `GOOGLE_CLIENT_ID` | Yes | - | OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Yes | - | OAuth client secret |
-| `QCLUSTER_WAIT` | No | `60` | Debounce seconds before processing entries |
+| `SYNC_VALIDATE_INTERVAL` | No | `10` | Minutes between validation runs |
 
 ## Troubleshooting
 
@@ -133,24 +133,16 @@ systemctl --user enable --now togglsync
 
 **Check:**
 1. Google Calendar connected (User Credentials → Google OAuth status)
-2. Default calendar set (Admin → Calendars)
-3. QCluster running: `docker exec togglsync ps aux | grep qcluster`
-4. Time entry has stop time (running entries not synced)
-5. Failed tasks: `/admin/django_q/failure/`
+2. QCluster running: `docker exec togglsync ps aux | grep qcluster`
+3. Failed tasks: `/admin/django_q/failure/`
+4. Running entries sync with grey color and 1-min duration; they update when stopped
 
 ### Django Q Task Errors
 
-**Error**: `"takes 2 positional arguments but 4 were given"`
-
-**Cause**: Old scheduled tasks with incorrect args format (pre-fix)
-
-**Fix**:
-```bash
-docker exec togglsync python manage.py shell -c \
-  "from django_q.models import Schedule; Schedule.objects.filter(func='sync.tasks.process_time_entry_event').delete()"
-```
-
-**Why**: Django Q requires args as JSON list `[arg1, arg2]`, not tuple `(arg1, arg2)`. Fixed in tasks.py line 127.
+Check failed tasks at `/admin/django_q/failure/`. Common causes:
+- Google OAuth tokens expired/revoked (user needs to re-authorize)
+- Toggl API rate limiting (30 requests/hour)
+- Network transient errors (tasks will be retried by qcluster)
 
 ### File Permissions (Podman)
 
@@ -168,14 +160,6 @@ SQLite has limited concurrent writes. For production with high concurrency, cons
 **Check**: `Q_CLUSTER['workers']` should be `1` for SQLite (in `config/settings.py`)
 
 ## Performance Tuning
-
-### Webhook Debounce
-
-Control delay before processing time entries (prevents rapid API calls):
-
-```bash
-QCLUSTER_WAIT=30  # Process after 30s of no updates
-```
 
 ### Gunicorn Workers
 
@@ -201,10 +185,6 @@ docker-compose build && docker-compose up -d
 # Podman
 podman build -t localhost/togglsync:latest .
 systemctl --user restart togglsync
-
-# Clear old scheduled tasks (if needed)
-docker exec togglsync python manage.py shell -c \
-  "from django_q.models import Schedule; Schedule.objects.filter(func='sync.tasks.process_time_entry_event').delete()"
 ```
 
 ## Production Checklist
@@ -217,10 +197,25 @@ docker exec togglsync python manage.py shell -c \
 - [ ] Database backups automated
 - [ ] Webhook flow tested end-to-end
 
-## Key Files
+## Architecture
+
+### Sync Flow
+
+1. Toggl webhook → `sync/views.py:toggl_webhook` saves entry to DB (`synced=False`)
+2. `async_task` queues `process_time_entry_event` in Django Q
+3. QCluster worker picks up task immediately, syncs to Google Calendar
+4. Optimistic locking: if entry was modified during sync, `synced` stays `False` and the next queued task handles it
+
+### Periodic Tasks
+
+- **`validate_synced_events`** (every `SYNC_VALIDATE_INTERVAL` minutes): Checks synced entries against Google Calendar, marks discrepancies as unsynced for re-sync
+
+### Key Files
 
 - **`entrypoint.sh`**: Migrations → static → admin user → qcluster → gunicorn
-- **`sync/tasks.py`**: Background task processing with debounce
+- **`sync/tasks.py`**: Background task processing (immediate, no debounce)
 - **`sync/views.py`**: Webhook endpoint with signature verification
-- **`sync/services/toggl.py`**: Toggl API client (webhook CRUD)
+- **`sync/services/gcal.py`**: Google Calendar API client with auto token refresh
+- **`sync/services/toggl.py`**: Toggl API client (metadata + webhook CRUD)
+- **`sync/apps.py`**: Registers periodic validation schedule on startup
 - **`scripts/togglsync.container`**: Podman systemd service

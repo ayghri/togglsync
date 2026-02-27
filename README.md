@@ -4,8 +4,9 @@ Automatically sync your Toggl Track time entries to Google Calendar events in re
 
 ## Implemented features
 
-- Time entries appear in Google Calendar within 30 seconds (adjustable) via Toggl webhooks
-- Calendar mapping: Route time entries to different calendars (with custom color) based on project, tag, workspace, or organization
+- Time entries synced to Google Calendar in real-time via Toggl webhooks and Django Q background tasks
+- Color mapping: Assign Google Calendar event colors based on project, tag, workspace, or organization (priority order)
+- Periodic validation: Checks synced events against Google Calendar and re-syncs discrepancies
 - Multi-user support: Each user manages their own Toggl API token
 
 ## Quick Start
@@ -67,13 +68,13 @@ I recommend using non-admin user to sync things, make sure the added user has pe
 1. Go to **Toggl Workspaces**
 2. Select workspaces → **Setup webhook for selected workspaces**
 
-#### Create Calendar Mappings (Optional)
+#### Create Color Mappings (Optional)
 
-Route entries to specific calendars based on project, tag, workspace, or organization:
+Assign Google Calendar event colors based on project, tag, workspace, or organization. Priority: tag > project > workspace > organization.
 
-1. Go to **Calendar Mappings** → **Add**
-2. Select an entity and destination calendar
-3. Optionally set a color
+1. Go to **Color Mappings** → **Add**
+2. Select entity type, entity, and color
+3. Set process order (lower = higher priority among same type)
 
 
 ## License
