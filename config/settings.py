@@ -184,6 +184,11 @@ LOGGING = {
             "level": "WARNING",
             "propagate": False,
         },
+        "django_q": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
 }
 
@@ -191,24 +196,9 @@ LOGGING = {
 Q_CLUSTER = {
     "name": "togglsync",
     "workers": 1,
-    "recycle": 500,
     "timeout": 60,
     "retry": 120,
-    "queue_limit": 50,
-    "bulk": 1,
     "orm": "default",
-    "catch_up": False,
-    "save_limit": 0,  # Don't save task results (reduces SQLite writes)
-    "poll": 10,
 }
 
-# Webhook processing delay (seconds)
-# Wait this long after last update before syncing to Google Calendar
-QCLUSTER_WAIT = int(os.getenv("QCLUSTER_WAIT", "60"))
-
-# Periodic task intervals (seconds)
-SYNC_CATCHUP_INTERVAL = int(os.getenv("SYNC_CATCHUP_INTERVAL", "33"))
-SYNC_VALIDATE_INTERVAL = int(os.getenv("SYNC_VALIDATE_INTERVAL", "43"))
-
-# Delay before retrying a failed sync task (seconds)
-SYNC_ERROR_RETRY_DELAY = int(os.getenv("SYNC_ERROR_RETRY_DELAY", "120"))
+SYNC_VALIDATE_INTERVAL = int(os.getenv("SYNC_VALIDATE_INTERVAL", "10"))

@@ -9,7 +9,6 @@ class SyncConfig(AppConfig):
     name = 'sync'
 
     def ready(self):
-        """Import signals and register periodic schedules."""
         import sync.signals  # noqa
 
         from django.db.models.signals import post_migrate
@@ -17,9 +16,22 @@ class SyncConfig(AppConfig):
 
     @staticmethod
     def _setup_schedules(sender, **kwargs):
-        """Set up django-q periodic schedules after migrations complete."""
-        from sync.tasks import ensure_periodic_schedules
         try:
-            ensure_periodic_schedules()
+            from django_q.models import Schedule
+
+            from django.conf import settings
+            Schedule.objects.update_or_create(
+                name="validate_synced_events",
+                defaults={
+                    "func": "sync.tasks.validate_synced_events",
+                    "schedule_type": Schedule.MINUTES,
+                    "minutes": getattr(settings, 'SYNC_VALIDATE_INTERVAL', 10),
+                },
+            )
+
+            # Clean up old schedules
+            Schedule.objects.filter(name="process_unsynced_entries").delete()
+
+            logger.info("Periodic schedules ensured")
         except Exception as e:
             logger.warning(f"Could not set up periodic schedules: {e}")

@@ -123,9 +123,3 @@ class TogglService:
             f"subscriptions/{workspace_id}/{subscription_id}",
             json={"enabled": enabled},
         )
-
-    def ping_webhook(self, workspace_id: int, subscription_id: int):
-        return self._request_webhook_api(
-            "POST",
-            f"subscriptions/{workspace_id}/{subscription_id}/ping",
-        )

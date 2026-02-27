@@ -19,12 +19,10 @@ class UserCredentials(models.Model):
         verbose_name_plural = "Credentials"
 
     def __str__(self):
-        api_token = str(self.toggl_api_token)
-        masked = (
-            api_token[:4] + "***" + api_token[-4:]
-            if self.toggl_api_token
-            else "Not set"
-        )
+        if self.toggl_api_token:
+            masked = self.toggl_api_token[:4] + "***" + self.toggl_api_token[-4:]
+        else:
+            masked = "Not set"
         return f"Toggl Config for {self.user.username} (token: {masked})"
 
     @property
@@ -263,10 +261,10 @@ class EntityColorMapping(models.Model):
     )
 
     def get_color_hex(self):
-        return self.EVENT_COLORS[str(self.color_name)]
+        return self.EVENT_COLORS[self.color_name]
 
     def get_color_id(self):
-        return self.COLOR_ID_MAP[str(self.color_name)]
+        return self.COLOR_ID_MAP[self.color_name]
 
     def find_matching_entries(self):
         base_query = TogglTimeEntry.objects.filter(
@@ -303,24 +301,13 @@ class EntityColorMapping(models.Model):
         verbose_name = "Color Mapping"
         verbose_name_plural = "Color Mappings"
 
-    def __str__(self):
-        return f"{self.entity_type}: {self.entity_name} -> {self.color_name}"
-
-
-def resolve_color(user, time_entry: dict) -> str | None:
-    """Resolve event color by priority: tags > project > workspace > organization."""
-    ECM = EntityColorMapping
-
-    tag_ids = time_entry.get("tag_ids") or time_entry.get("tags", [])
-    if tag_ids:
-        if isinstance(tag_ids[0], str):
-            tag_objects = TogglTag.objects.filter(user=user, name__in=tag_ids)
-            tag_ids = [t.toggl_id for t in tag_objects]
+    @classmethod
+    def resolve_color(cls, user, project_id=None, tag_ids=None) -> str | None:
         if tag_ids:
             mapping = (
-                ECM.objects.filter(
+                cls.objects.filter(
                     user=user,
-                    entity_type=ECM.EntityType.TAG,
+                    entity_type=cls.EntityType.TAG,
                     entity_id__in=tag_ids,
                 )
                 .order_by("process_order")
@@ -329,72 +316,37 @@ def resolve_color(user, time_entry: dict) -> str | None:
             if mapping:
                 return mapping.get_color_id()
 
-    project_id = time_entry.get("project_id") or time_entry.get("pid")
-    if project_id:
-        mapping = ECM.objects.filter(
-            user=user,
-            entity_type=ECM.EntityType.PROJECT,
-            entity_id=project_id,
-        ).first()
-        if mapping:
-            return mapping.get_color_id()
-
-    workspace_id = time_entry.get("workspace_id") or time_entry.get("wid")
-    if workspace_id:
-        mapping = ECM.objects.filter(
-            user=user,
-            entity_type=ECM.EntityType.WORKSPACE,
-            entity_id=workspace_id,
-        ).first()
-        if mapping:
-            return mapping.get_color_id()
-
-        ws = TogglWorkspace.objects.filter(
-            user=user, toggl_id=workspace_id
-        ).first()
-        if ws and ws.organization_id:
-            mapping = ECM.objects.filter(
+        if project_id:
+            mapping = cls.objects.filter(
                 user=user,
-                entity_type=ECM.EntityType.ORGANIZATION,
-                entity_id=ws.organization.toggl_id,
+                entity_type=cls.EntityType.PROJECT,
+                entity_id=project_id,
             ).first()
             if mapping:
                 return mapping.get_color_id()
 
-    return None
+            project = TogglProject.objects.filter(
+                user=user, toggl_id=project_id
+            ).first()
+            if project:
+                mapping = cls.objects.filter(
+                    user=user,
+                    entity_type=cls.EntityType.WORKSPACE,
+                    entity_id=project.workspace.toggl_id,
+                ).first()
+                if mapping:
+                    return mapping.get_color_id()
 
+                if project.workspace.organization_id:
+                    mapping = cls.objects.filter(
+                        user=user,
+                        entity_type=cls.EntityType.ORGANIZATION,
+                        entity_id=project.workspace.organization.toggl_id,
+                    ).first()
+                    if mapping:
+                        return mapping.get_color_id()
 
-def check_unknown_entities(time_entry: dict, user) -> dict:
-    """Return dict of entity types/IDs not yet in the DB for this user."""
-    unknown = {}
+        return None
 
-    workspace_id = time_entry.get("workspace_id") or time_entry.get("wid")
-    if (
-        workspace_id
-        and not TogglWorkspace.objects
-        .filter(user=user, toggl_id=workspace_id)
-        .exists()
-    ):
-        unknown["workspace"] = workspace_id
-
-    project_id = time_entry.get("project_id") or time_entry.get("pid")
-    if (
-        project_id
-        and not TogglProject.objects
-        .filter(user=user, toggl_id=project_id)
-        .exists()
-    ):
-        unknown["project"] = project_id
-
-    tag_ids = time_entry.get("tag_ids", [])
-    if tag_ids:
-        existing_tags = set(
-            TogglTag.objects.filter(
-                user=user, toggl_id__in=tag_ids
-            ).values_list("toggl_id", flat=True)
-        )
-        unknown_tags = [t for t in tag_ids if t not in existing_tags]
-        if unknown_tags:
-            unknown["tags"] = unknown_tags
-
-    return unknown
+    def __str__(self):
+        return f"{self.entity_type}: {self.entity_name} -> {self.color_name}"

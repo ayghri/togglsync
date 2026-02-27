@@ -1,197 +1,98 @@
-"""Tests for Google OAuth token refresh functionality."""
+"""Tests for Google OAuth token refresh."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import Mock, patch, MagicMock
 
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.utils import timezone
 
-from sync.models import UserCredentials
-from sync.services.gcal import GoogleCalendarService, GoogleCalendarError
+from sync.services.gcal import GoogleCalendarService
 
 
-class GoogleAuthRefreshTestCase(TestCase):
-    """Test automatic token refresh for Google OAuth."""
-
+class GoogleAuthRefreshTest(TestCase):
     def setUp(self):
-        """Create test user and credentials."""
-        self.user = User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123"
-        )
-
-        # Create mock credentials that will expire soon
-        expiry = timezone.now() - timedelta(minutes=5)  # Already expired
-
-        self.mock_creds_data = {
-            "token": "mock_access_token_123",
-            "refresh_token": "mock_refresh_token_456",
+        self.user = User.objects.create_user("testuser", password="pass")
+        expiry = timezone.now() - timedelta(minutes=5)
+        self.creds_data = {
+            "token": "mock_token",
+            "refresh_token": "mock_refresh",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "client_id": "mock_client_id",
-            "client_secret": "mock_client_secret",
+            "client_id": "cid", "client_secret": "csec",
             "scopes": ["https://www.googleapis.com/auth/calendar.events"],
             "expiry": expiry.isoformat(),
         }
-
-        self.user.credentials.gauth_credentials_json = json.dumps(self.mock_creds_data)
+        self.user.credentials.gauth_credentials_json = json.dumps(self.creds_data)
         self.user.credentials.save()
 
-    def test_credentials_are_expired(self):
-        """Test that we can detect expired credentials."""
+    def _mock_creds(self, expired=True):
+        m = Mock()
+        m.expired = expired
+        m.refresh = Mock()
+        m.to_json.return_value = json.dumps(self.creds_data)
+        return m
+
+    def test_detects_expired(self):
         with patch('sync.services.gcal.build'), \
-             patch('sync.services.gcal.Credentials') as mock_creds_class:
+             patch('sync.services.gcal.Credentials') as cls:
+            cls.from_authorized_user_info.return_value = self._mock_creds(True)
+            svc = GoogleCalendarService(user=self.user)
+            self.assertTrue(svc.credentials.expired)
 
-            # Mock credentials object
-            mock_creds = Mock()
-            mock_creds.expired = True
-            mock_creds.to_json.return_value = json.dumps(self.mock_creds_data)
-            mock_creds_class.from_authorized_user_info.return_value = mock_creds
-
-            service = GoogleCalendarService(user=self.user)
-
-            # Verify credentials are detected as expired
-            self.assertTrue(service.credentials.expired)
-
-    def test_refresh_is_called_when_expired(self):
-        """Test that refresh() is called when credentials are expired."""
+    def test_refresh_called_when_expired(self):
         with patch('sync.services.gcal.build'), \
-             patch('sync.services.gcal.Credentials') as mock_creds_class, \
-             patch('sync.services.gcal.Request') as mock_request:
-
-            # Mock credentials object
-            mock_creds = Mock()
-            mock_creds.expired = True
-            mock_creds.refresh = Mock()
-            mock_creds.to_json.return_value = json.dumps({
-                **self.mock_creds_data,
-                "token": "new_access_token_789",
-                "expiry": (timezone.now() + timedelta(hours=1)).isoformat(),
-            })
-            mock_creds_class.from_authorized_user_info.return_value = mock_creds
-
-            service = GoogleCalendarService(user=self.user)
-            # Reset mock to ignore the refresh call from __init__
+             patch('sync.services.gcal.Credentials') as cls, \
+             patch('sync.services.gcal.Request'):
+            mock_creds = self._mock_creds(True)
+            cls.from_authorized_user_info.return_value = mock_creds
+            svc = GoogleCalendarService(user=self.user)
             mock_creds.refresh.reset_mock()
-
-            service._refresh_maybe()
-
-            # Verify refresh was called
+            svc._refresh_maybe()
             mock_creds.refresh.assert_called_once()
 
-    def test_refreshed_token_is_saved_to_database(self):
-        """Test that refreshed token is persisted to the database."""
-        new_token = "new_refreshed_token_xyz"
-        new_expiry = timezone.now() + timedelta(hours=1)
-
+    def test_refreshed_token_saved(self):
+        new_data = {**self.creds_data, "token": "new_tok"}
         with patch('sync.services.gcal.build'), \
-             patch('sync.services.gcal.Credentials') as mock_creds_class, \
+             patch('sync.services.gcal.Credentials') as cls, \
              patch('sync.services.gcal.Request'):
-
-            # Mock credentials object
-            mock_creds = Mock()
-            mock_creds.expired = True
-            mock_creds.refresh = Mock()
-
-            new_creds_data = {
-                **self.mock_creds_data,
-                "token": new_token,
-                "expiry": new_expiry.isoformat(),
-            }
-            mock_creds.to_json.return_value = json.dumps(new_creds_data)
-            mock_creds_class.from_authorized_user_info.return_value = mock_creds
-
-            service = GoogleCalendarService(user=self.user)
-            service._refresh_maybe()
-
-            # Reload credentials from database
+            mock_creds = self._mock_creds(True)
+            mock_creds.to_json.return_value = json.dumps(new_data)
+            cls.from_authorized_user_info.return_value = mock_creds
+            GoogleCalendarService(user=self.user)
             self.user.credentials.refresh_from_db()
-            saved_creds = json.loads(self.user.credentials.gauth_credentials_json)
+            saved = json.loads(self.user.credentials.gauth_credentials_json)
+            self.assertEqual(saved["token"], "new_tok")
 
-            # Verify new token was saved
-            self.assertEqual(saved_creds["token"], new_token)
-
-    def test_refresh_before_api_calls(self):
-        """Test that _refresh_maybe is called before API operations."""
-        with patch('sync.services.gcal.build') as mock_build, \
-             patch('sync.services.gcal.Credentials') as mock_creds_class:
-
-            # Mock credentials object
-            mock_creds = Mock()
-            mock_creds.expired = False
-            mock_creds.to_json.return_value = json.dumps(self.mock_creds_data)
-            mock_creds_class.from_authorized_user_info.return_value = mock_creds
-
-            # Mock service
-            mock_service = MagicMock()
-            mock_build.return_value = mock_service
-
-            service = GoogleCalendarService(user=self.user)
-
-            # Spy on _refresh_maybe
-            with patch.object(service, '_refresh_maybe', wraps=service._refresh_maybe) as spy:
-                # Call an API method
-                try:
-                    service.find_event_by_ical_uid("test_cal", "test_uid")
-                except:
-                    pass  # We don't care if it fails, just that refresh was called
-
-                # Verify refresh check was called
-                spy.assert_called()
-
-    def test_no_refresh_when_not_expired(self):
-        """Test that refresh is NOT called when credentials are still valid."""
-        # Create non-expired credentials
-        future_expiry = timezone.now() + timedelta(hours=1)
-
-        valid_creds_data = {
-            **self.mock_creds_data,
-            "expiry": future_expiry.isoformat(),
-        }
-
-        self.user.credentials.gauth_credentials_json = json.dumps(valid_creds_data)
-        self.user.credentials.save()
-
+    def test_no_refresh_when_valid(self):
         with patch('sync.services.gcal.build'), \
-             patch('sync.services.gcal.Credentials') as mock_creds_class:
-
-            # Mock credentials object
-            mock_creds = Mock()
-            mock_creds.expired = False
-            mock_creds.refresh = Mock()
-            mock_creds.to_json.return_value = json.dumps(valid_creds_data)
-            mock_creds_class.from_authorized_user_info.return_value = mock_creds
-
-            service = GoogleCalendarService(user=self.user)
-            service._refresh_maybe()
-
-            # Verify refresh was NOT called
+             patch('sync.services.gcal.Credentials') as cls:
+            mock_creds = self._mock_creds(False)
+            cls.from_authorized_user_info.return_value = mock_creds
+            svc = GoogleCalendarService(user=self.user)
+            svc._refresh_maybe()
             mock_creds.refresh.assert_not_called()
 
-    def test_refresh_updates_updated_at_timestamp(self):
-        """Test that database updated_at timestamp is updated on refresh."""
+    def test_refresh_updates_timestamp(self):
+        orig = self.user.credentials.updated_at
         with patch('sync.services.gcal.build'), \
-             patch('sync.services.gcal.Credentials') as mock_creds_class, \
+             patch('sync.services.gcal.Credentials') as cls, \
              patch('sync.services.gcal.Request'):
-
-            # Record original timestamp
-            original_updated_at = self.user.credentials.updated_at
-
-            # Mock credentials object
-            mock_creds = Mock()
-            mock_creds.expired = True
-            mock_creds.refresh = Mock()
-            mock_creds.to_json.return_value = json.dumps(self.mock_creds_data)
-            mock_creds_class.from_authorized_user_info.return_value = mock_creds
-
-            service = GoogleCalendarService(user=self.user)
-            service._refresh_maybe()
-
-            # Reload and check timestamp changed
+            cls.from_authorized_user_info.return_value = self._mock_creds(True)
+            GoogleCalendarService(user=self.user)
             self.user.credentials.refresh_from_db()
-            self.assertGreater(
-                self.user.credentials.updated_at,
-                original_updated_at
-            )
+            self.assertGreater(self.user.credentials.updated_at, orig)
+
+    def test_refresh_called_before_api(self):
+        with patch('sync.services.gcal.build') as build, \
+             patch('sync.services.gcal.Credentials') as cls:
+            mock_creds = self._mock_creds(False)
+            cls.from_authorized_user_info.return_value = mock_creds
+            build.return_value = MagicMock()
+            svc = GoogleCalendarService(user=self.user)
+            with patch.object(svc, '_refresh_maybe', wraps=svc._refresh_maybe) as spy:
+                try:
+                    svc.find_event_by_ical_uid("cal", "uid")
+                except:
+                    pass
+                spy.assert_called()
