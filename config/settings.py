@@ -87,7 +87,6 @@ DATABASES = {
     }
 }
 
-
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -196,11 +195,11 @@ Q_CLUSTER = {
     "timeout": 60,
     "retry": 120,
     "queue_limit": 50,
-    "bulk": 10,
-    "orm": "default",  # Use Django ORM as broker (SQLite compatible)
-    "catch_up": False,  # Don't run missed scheduled tasks
-    "save_limit": 250,  # Keep last 250 task results
-    "poll": 5,  # Check for scheduled tasks every 5 seconds
+    "bulk": 1,
+    "orm": "default",
+    "catch_up": False,
+    "save_limit": 0,  # Don't save task results (reduces SQLite writes)
+    "poll": 10,
 }
 
 # Webhook processing delay (seconds)
@@ -208,8 +207,8 @@ Q_CLUSTER = {
 QCLUSTER_WAIT = int(os.getenv("QCLUSTER_WAIT", "60"))
 
 # Periodic task intervals (seconds)
-SYNC_CATCHUP_INTERVAL = int(os.getenv("SYNC_CATCHUP_INTERVAL", "10"))
-SYNC_VALIDATE_INTERVAL = int(os.getenv("SYNC_VALIDATE_INTERVAL", "20"))
+SYNC_CATCHUP_INTERVAL = int(os.getenv("SYNC_CATCHUP_INTERVAL", "33"))
+SYNC_VALIDATE_INTERVAL = int(os.getenv("SYNC_VALIDATE_INTERVAL", "43"))
 
 # Delay before retrying a failed sync task (seconds)
 SYNC_ERROR_RETRY_DELAY = int(os.getenv("SYNC_ERROR_RETRY_DELAY", "120"))
