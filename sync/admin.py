@@ -4,16 +4,16 @@ import logging
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
+from django.db.models import Max
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+from django_q.tasks import async_task
 from google.oauth2.credentials import Credentials
 
-from .models import UserCredentials
-from .models import EntityColorMapping
-from .models import TogglTimeEntry
-from .models import TogglOrganization
-from .models import TogglProject
-from .models import TogglTag
-from .models import TogglWorkspace
+from .models import (
+    UserCredentials, EntityColorMapping, TogglTimeEntry,
+    TogglOrganization, TogglProject, TogglTag, TogglWorkspace,
+)
 from .services import TogglAPIError, TogglService
 from .tasks import sync_toggl_metadata_for_user
 
@@ -21,14 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class UserScopedAdmin(admin.ModelAdmin):
-    """
-    Base admin that restricts users to only their own data.
-    Bypasses Django's model-level permissions since data isolation
-    is enforced by get_queryset and per-object checks.
-    """
+    """Restricts users to only their own data."""
 
     def get_queryset(self, request):
-        """Filter queryset to only show user's own records."""
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
@@ -51,22 +46,18 @@ class UserScopedAdmin(admin.ModelAdmin):
         return request.user.is_staff
 
     def has_delete_permission(self, request, obj=None):
-        """Block deleting other users' objects."""
         if obj is not None and obj.user_id != request.user.id:
             return False
         return request.user.is_staff
 
     def save_model(self, request, obj, form, change):
-        """Auto-assign user on create, prevent user change on edit."""
-        if not change:  # Creating new object
+        if not change:
             obj.user = request.user
         elif not request.user.is_superuser:
-            # Prevent changing user field on existing objects
             obj.user = self.model.objects.get(pk=obj.pk).user
         super().save_model(request, obj, form, change)
 
     def get_exclude(self, request, obj=None):
-        """Hide user field entirely from non-superusers."""
         exclude = list(super().get_exclude(request, obj) or [])
         if not request.user.is_superuser:
             if "user" not in exclude:
@@ -74,15 +65,12 @@ class UserScopedAdmin(admin.ModelAdmin):
         return exclude
 
     def get_fieldsets(self, request, obj=None):
-        """Remove user from fieldsets for non-superusers."""
         fieldsets = super().get_fieldsets(request, obj)
         if request.user.is_superuser:
             return fieldsets
-        # Filter out 'user' from all fieldsets
         filtered = []
         for name, options in fieldsets:
             fields = options.get("fields", [])
-            # Handle nested tuples/lists in fields
             new_fields = []
             for field in fields:
                 if isinstance(field, (list, tuple)):
@@ -100,9 +88,7 @@ class UserScopedAdmin(admin.ModelAdmin):
         return filtered
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        """Filter FK choices to user's own data."""
         if not request.user.is_superuser:
-            # Filter any FK that points to a user-scoped model
             related_model = db_field.related_model
             if hasattr(related_model, "user"):
                 kwargs["queryset"] = related_model.objects.filter(
@@ -111,14 +97,12 @@ class UserScopedAdmin(admin.ModelAdmin):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def get_list_display(self, request):
-        """Add user column for superusers."""
         list_display = list(super().get_list_display(request))
         if request.user.is_superuser and "user" not in list_display:
             list_display.insert(1, "user")
         return list_display
 
     def get_list_filter(self, request):
-        """Add user filter for superusers."""
         list_filter = list(super().get_list_filter(request))
         if request.user.is_superuser and "user" not in list_filter:
             list_filter = ["user"] + list_filter
@@ -161,7 +145,6 @@ class UserCredsAdmin(UserScopedAdmin):
 
     @admin.display(description="Google OAuth Credentials")
     def google_oauth_display(self, obj):
-        """Display Google OAuth token and expiry."""
         if not obj.gauth_credentials_json:
             return "Not connected"
 
@@ -169,14 +152,12 @@ class UserCredsAdmin(UserScopedAdmin):
             cred_data = json.loads(obj.gauth_credentials_json)
             google_creds = Credentials.from_authorized_user_info(cred_data)
 
-            # Mask the token
             token = google_creds.token or ""
             if len(token) > 16:
                 masked_token = token[:8] + "****" + token[-8:]
             else:
                 masked_token = "****"
 
-            # Format expiry
             expiry = google_creds.expiry
             expiry_str = (
                 expiry.strftime("%Y-%m-%d %H:%M:%S") if expiry else "Unknown"
@@ -187,7 +168,6 @@ class UserCredsAdmin(UserScopedAdmin):
             return f"Error: {e}"
 
     def has_add_permission(self, request):
-        # Allow add only if user doesn't have a config yet
         if request.user.is_superuser:
             return True
         return not UserCredentials.objects.filter(user=request.user).exists()
@@ -215,14 +195,7 @@ class UserCredsAdmin(UserScopedAdmin):
         return super().changelist_view(request, extra_context)
 
 
-# =============================================================================
-# Color Mappings
-# =============================================================================
-
-
 class ColorMappingForm(forms.ModelForm):
-    """Custom form for ColorMapping with entity dropdown."""
-
     entity = forms.ChoiceField(
         label="Entity",
         help_text="Select a project, tag, workspace, or organization to map",
@@ -243,19 +216,14 @@ class ColorMappingForm(forms.ModelForm):
         if self._user:
             self._build_entity_choices(self._user)
 
-        # Default process_order to max+1 for new mappings
         if not self.instance.pk:
-            from django.db.models import Max
             max_order = EntityColorMapping.objects.aggregate(
                 m=Max("process_order")
             )["m"]
             self.initial["process_order"] = (max_order or 0) + 1
 
-        # Add color swatches to color choices
         color_field = self.fields.get("color_name")
         if color_field:
-            from django.utils.safestring import mark_safe
-
             new_choices = []
             for color_name, hex_color in EntityColorMapping.EVENT_COLORS.items():
                 label = mark_safe(
@@ -267,14 +235,12 @@ class ColorMappingForm(forms.ModelForm):
                 new_choices.append((color_name, label))
             color_field.choices = new_choices
 
-        # If editing existing mapping, set initial value
         if self.instance and self.instance.pk:
             self.fields["entity"].initial = (
                 f"{self.instance.entity_type}:{self.instance.entity_id}"
             )
 
     def _build_entity_choices(self, user):
-        """Build grouped choices from user's Toggl entities."""
         choices = [("", "-- Select an entity --")]
 
         projects = TogglProject.objects.filter(user=user, active=True).order_by("name")
@@ -358,15 +324,6 @@ class ColorMappingAdmin(UserScopedAdmin):
 
     @admin.action(description="Apply color mappings to past time entries")
     def apply_mappings(self, request, queryset):
-        """
-        Apply color mappings to existing synced time entries.
-
-        Iterates through mappings from high to low process_order, so that
-        high priority (high process_order) mappings apply last and override
-        lower priority mappings.
-        """
-        from django_q.tasks import async_task
-
         user = request.user
 
         all_mappings = EntityColorMapping.objects.filter(user=user).order_by(
@@ -409,11 +366,6 @@ class ColorMappingAdmin(UserScopedAdmin):
                 super().__init__(*args, **form_kwargs)
 
         return FormWithUser
-
-
-# =============================================================================
-# Toggl Metadata (with sync actions)
-# =============================================================================
 
 
 @admin.register(TogglOrganization)
@@ -702,8 +654,6 @@ class EntryAdmin(UserScopedAdmin):
 
     @admin.action(description="Sync selected entries to Google Calendar")
     def sync_to_google_calendar(self, request, queryset):
-        from django_q.tasks import async_task
-
         count = 0
         for entry in queryset.filter(user=request.user):
             async_task(
@@ -724,7 +674,6 @@ class EntryAdmin(UserScopedAdmin):
 
     @admin.display(description="Status", ordering="synced")
     def synced_status(self, obj):
-        """Display sync status."""
         if obj.pending_deletion:
             return "Pending deletion"
         elif obj.synced:

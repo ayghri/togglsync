@@ -2,30 +2,14 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from .utils import UserScopedModel
 
-
-class UserCredentials(UserScopedModel, models.Model):
+class UserCredentials(models.Model):
     user = models.OneToOneField(
         User, on_delete=models.CASCADE, related_name="credentials"
     )
-    toggl_api_token = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        help_text="Toggl Token",
-    )
-    gauth_credentials_json = models.TextField(
-        blank=True,
-        default="",
-        help_text="Google OAuth",
-    )
-    google_calendar_id = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        help_text="Auto-created Toggl calendar ID",
-    )
+    toggl_api_token = models.CharField(max_length=255, blank=True, default="")
+    gauth_credentials_json = models.TextField(blank=True, default="")
+    google_calendar_id = models.CharField(max_length=255, blank=True, default="")
     timezone = models.CharField(max_length=50, default="UTC")
     last_toggl_metadata_sync = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -45,13 +29,10 @@ class UserCredentials(UserScopedModel, models.Model):
 
     @property
     def is_connected(self) -> bool:
-        """Check if OAuth tokens are present."""
         return bool(self.gauth_credentials_json)
 
 
-class TogglOrganization(UserScopedModel, models.Model):
-    """Cached Toggl organization per user."""
-
+class TogglOrganization(models.Model):
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -70,9 +51,7 @@ class TogglOrganization(UserScopedModel, models.Model):
         return str(self.name)
 
 
-class TogglWorkspace(UserScopedModel, models.Model):
-    """Cached Toggl workspace with webhook configuration per user."""
-
+class TogglWorkspace(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="toggl_workspaces"
     )
@@ -110,14 +89,8 @@ class TogglWorkspace(UserScopedModel, models.Model):
         webhook_status = " [webhook]" if self.webhook_enabled else ""
         return f"{self.name}{webhook_status}"
 
-    @property
-    def has_webhook(self):
-        return bool(self.webhook_subscription_id)
 
-
-class TogglProject(UserScopedModel, models.Model):
-    """Cached Toggl project per user."""
-
+class TogglProject(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="toggl_projects"
     )
@@ -140,9 +113,7 @@ class TogglProject(UserScopedModel, models.Model):
         return f"{self.name}{status}"
 
 
-class TogglTag(UserScopedModel, models.Model):
-    """Cached Toggl tag per user."""
-
+class TogglTag(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="toggl_tags"
     )
@@ -164,22 +135,16 @@ class TogglTag(UserScopedModel, models.Model):
         return self.name
 
 
-class TogglTimeEntry(UserScopedModel, models.Model):
-    """Tracks time entries from Toggl webhooks"""
-
+class TogglTimeEntry(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="synced_entries"
     )
     toggl_id = models.BigIntegerField()
-
-    # Entry data from webhook
     description = models.TextField(blank=True, default="")
     start_time = models.DateTimeField()
     end_time = models.DateTimeField(null=True, blank=True)
     project_id = models.BigIntegerField(null=True, blank=True)
     tag_ids = models.JSONField(default=list)
-
-    # Sync tracking
     synced = models.BooleanField(default=False)
     pending_deletion = models.BooleanField(default=False)
 
@@ -200,18 +165,9 @@ class TogglTimeEntry(UserScopedModel, models.Model):
         return "toggl" + str(self.toggl_id)
 
     def get_gcal_data(self, color_id: str | None = None) -> dict:
-        """
-        Prepare all data needed for Google Calendar event creation/update.
-
-        Args:
-            color_id: Optional color ID for the event (from color mapping)
-
-        Returns:
-            Dictionary with event_id, summary, start, end, description, color_id
-        """
+        """Build dict for Google Calendar event creation/update."""
         from datetime import timedelta
 
-        # Query database for project name
         project_name = None
         if self.project_id:
             project = TogglProject.objects.filter(
@@ -220,13 +176,11 @@ class TogglTimeEntry(UserScopedModel, models.Model):
             if project:
                 project_name = project.name
 
-        # Query database for tag names
         tag_names = []
         if self.tag_ids:
             tags = TogglTag.objects.filter(user=self.user, toggl_id__in=self.tag_ids)
             tag_names = [t.name for t in tags]
 
-        # Build event description
         desc_lines = [f"Toggl Entry: {self.toggl_id}"]
         if project_name:
             desc_lines.append(f"Project: {project_name}")
@@ -234,21 +188,12 @@ class TogglTimeEntry(UserScopedModel, models.Model):
             desc_lines.append(f'Tags: {", ".join(tag_names)}')
         event_description = "\n".join(desc_lines)
 
-        # Determine start and end times
         start = self.start_time
-        if self.end_time:
-            end = self.end_time
-        else:
-            # Running entry: use start + 1 minute as placeholder
-            end = start + timedelta(minutes=1)
+        end = self.end_time or start + timedelta(minutes=1)
 
-        # Grey for running entries, otherwise use mapped color
-        if not self.end_time:
-            event_color_id = "8"
-        else:
-            event_color_id = color_id
+        # Grey for running entries, mapped color otherwise
+        event_color_id = "8" if not self.end_time else color_id
 
-        # Build summary
         summary = self.description or "(No description)"
 
         return {
@@ -265,9 +210,7 @@ class TogglTimeEntry(UserScopedModel, models.Model):
         return f'Entry {self.id}: {self.description[:50] or "(no description)"} ({status})'
 
 
-class EntityColorMapping(UserScopedModel, models.Model):
-    """Maps Toggl entities (projects, tags, etc.) to Google Calendar event colors."""
-
+class EntityColorMapping(models.Model):
     class EntityType(models.TextChoices):
         TAG = ("tag", "Tag")
         PROJECT = ("project", "Project")
@@ -323,11 +266,9 @@ class EntityColorMapping(UserScopedModel, models.Model):
         return self.EVENT_COLORS[str(self.color_name)]
 
     def get_color_id(self):
-        """Get Google Calendar color ID for this mapping's color."""
         return self.COLOR_ID_MAP[str(self.color_name)]
 
     def find_matching_entries(self):
-        """Find time entries that match this mapping's entity."""
         base_query = TogglTimeEntry.objects.filter(
             user=self.user,
             synced=True,
@@ -367,20 +308,9 @@ class EntityColorMapping(UserScopedModel, models.Model):
 
 
 def resolve_color(user, time_entry: dict) -> str | None:
-    """
-    Resolve event color for a time entry based on priority mappings.
-
-    Priority order (highest to lowest):
-    1. Tags - if any tag has a mapping, use that (process_order breaks ties)
-    2. Project - if project has a mapping
-    3. Workspace - if workspace has a mapping
-    4. Organization - if organization has a mapping (via workspace)
-
-    Returns Google Calendar color ID (1-11) or None.
-    """
+    """Resolve event color by priority: tags > project > workspace > organization."""
     ECM = EntityColorMapping
 
-    # 1. Check tags
     tag_ids = time_entry.get("tag_ids") or time_entry.get("tags", [])
     if tag_ids:
         if isinstance(tag_ids[0], str):
@@ -399,7 +329,6 @@ def resolve_color(user, time_entry: dict) -> str | None:
             if mapping:
                 return mapping.get_color_id()
 
-    # 2. Check project
     project_id = time_entry.get("project_id") or time_entry.get("pid")
     if project_id:
         mapping = ECM.objects.filter(
@@ -410,7 +339,6 @@ def resolve_color(user, time_entry: dict) -> str | None:
         if mapping:
             return mapping.get_color_id()
 
-    # 3. Check workspace
     workspace_id = time_entry.get("workspace_id") or time_entry.get("wid")
     if workspace_id:
         mapping = ECM.objects.filter(
@@ -421,7 +349,6 @@ def resolve_color(user, time_entry: dict) -> str | None:
         if mapping:
             return mapping.get_color_id()
 
-        # 4. Check organization (via workspace)
         ws = TogglWorkspace.objects.filter(
             user=user, toggl_id=workspace_id
         ).first()
@@ -438,13 +365,9 @@ def resolve_color(user, time_entry: dict) -> str | None:
 
 
 def check_unknown_entities(time_entry: dict, user) -> dict:
-    """
-    Check if a time entry contains unknown entities (project, tags, workspace) for a user.
-    Returns a dict of unknown entity types and their IDs.
-    """
+    """Return dict of entity types/IDs not yet in the DB for this user."""
     unknown = {}
 
-    # Check workspace
     workspace_id = time_entry.get("workspace_id") or time_entry.get("wid")
     if (
         workspace_id
@@ -454,7 +377,6 @@ def check_unknown_entities(time_entry: dict, user) -> dict:
     ):
         unknown["workspace"] = workspace_id
 
-    # Check project
     project_id = time_entry.get("project_id") or time_entry.get("pid")
     if (
         project_id
@@ -464,7 +386,6 @@ def check_unknown_entities(time_entry: dict, user) -> dict:
     ):
         unknown["project"] = project_id
 
-    # Check tags
     tag_ids = time_entry.get("tag_ids", [])
     if tag_ids:
         existing_tags = set(

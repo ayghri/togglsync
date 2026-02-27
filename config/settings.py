@@ -203,3 +203,10 @@ Q_CLUSTER = {
 # Webhook processing delay (seconds)
 # Wait this long after last update before syncing to Google Calendar
 QCLUSTER_WAIT = int(os.getenv("QCLUSTER_WAIT", "60"))
+
+# Periodic task intervals (seconds)
+SYNC_CATCHUP_INTERVAL = int(os.getenv("SYNC_CATCHUP_INTERVAL", "10"))
+SYNC_VALIDATE_INTERVAL = int(os.getenv("SYNC_VALIDATE_INTERVAL", "20"))
+
+# Delay before retrying a failed sync task (seconds)
+SYNC_ERROR_RETRY_DELAY = int(os.getenv("SYNC_ERROR_RETRY_DELAY", "120"))
