@@ -44,7 +44,7 @@ DJANGO_ADMIN_PASSWORD=<secure-password>
 - Enable **Google Calendar API**
 - Create OAuth 2.0 Client ID (Web application)
 - Add redirect URI: `https://{WEBHOOK_DOMAIN}/oauth/google/callback/`
-- Add scope: `https://www.googleapis.com/auth/calendar.events.owned`
+- Add scope: `https://www.googleapis.com/auth/calendar.app.created` ("Make secondary Google calendars, and see, create, change, and delete events on them")
 
 ### 3. Deploy
 
